@@ -436,9 +436,11 @@ export default function App() {
 
             {activeTab === 'settings' && (
               <SettingsView 
-                settings={state.settings || { telegramToken: '', telegramChatId: '', nextDnsApiKey: '', autoSyncIntervalMinutes: 30 }} 
+                settings={state.settings || { telegramBotToken: '', telegramChatId: '', nextDnsApiKey: '', autoSyncIntervalMinutes: 30, emailAlertsEnabled: false }} 
                 onSaveSettings={handleSaveSettings} 
                 onResetDatabase={handleResetDatabase}
+                onSyncAll={handleSyncAll}
+                syncing={syncing}
               />
             )}
           </ErrorBoundary>

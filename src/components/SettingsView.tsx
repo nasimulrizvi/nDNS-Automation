@@ -7,9 +7,11 @@ interface SettingsViewProps {
   settings: AppSettings;
   onSaveSettings: (newSettings: AppSettings) => Promise<void>;
   onResetDatabase: () => Promise<void>;
+  onSyncAll?: () => Promise<void>;
+  syncing?: boolean;
 }
 
-export default function SettingsView({ settings, onSaveSettings, onResetDatabase }: SettingsViewProps) {
+export default function SettingsView({ settings, onSaveSettings, onResetDatabase, onSyncAll, syncing }: SettingsViewProps) {
   const [apiKey, setApiKey] = useState(settings.nextDnsApiKey || '');
   const [botToken, setBotToken] = useState(settings.telegramBotToken || '');
   const [chatId, setChatId] = useState(settings.telegramChatId || '');
@@ -232,8 +234,47 @@ export default function SettingsView({ settings, onSaveSettings, onResetDatabase
           </form>
         </div>
 
-        {/* Database Management Card */}
+        {/* Automation & Database Management Column */}
         <div className="space-y-4">
+          {/* Automation Control Section */}
+          <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4">
+            <h3 className="font-bold text-white text-sm flex items-center gap-2">
+              <RefreshCw size={16} className="text-emerald-400" />
+              Automation & Multi-User Sync
+            </h3>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Sync applies your master blocklist plus user-specific denylist configurations to all NextDNS profiles in one unified call.
+            </p>
+
+            <div className="space-y-2.5 bg-slate-950/60 p-3.5 rounded-lg border border-slate-800/50 text-xs font-mono">
+              <div className="flex justify-between">
+                <span className="text-slate-400 font-sans">Sync Mechanism:</span>
+                <span className="text-emerald-400 font-semibold">Array PUT</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400 font-sans">Telegram Alerts:</span>
+                <span className={settings.telegramBotToken ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>
+                  {settings.telegramBotToken ? "Active" : "Not Configured"}
+                </span>
+              </div>
+            </div>
+
+            {onSyncAll && (
+              <button
+                type="button"
+                onClick={onSyncAll}
+                disabled={syncing}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition disabled:opacity-50"
+                id="settings-sync-button"
+              >
+                <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+                {syncing ? "Syncing Profiles..." : "Force Synced Profiles"}
+              </button>
+            )}
+          </div>
+
+          {/* Database Management Card */}
           <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4">
             <h3 className="font-bold text-red-400 text-sm flex items-center gap-2">
               <Trash2 size={16} />

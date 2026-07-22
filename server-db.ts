@@ -202,92 +202,15 @@ export class ServerDB {
     await ensureFile<ThreatFeed[]>(THREAT_FEEDS_FILE, defaultThreatFeeds);
 
     // Initialize Logs
-    const defaultLogs: LogEntry[] = [
-      {
-        id: 'log-1',
-        timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5 mins ago
-        domain: 'doubleclick.net',
-        rootDomain: 'doubleclick.net',
-        deviceName: 'MINE-Macbook',
-        clientIp: '192.168.1.10',
-        status: 'blocked',
-        matchedRule: 'Ad & Tracker Blocklist',
-        profileName: 'MINE'
-      },
-      {
-        id: 'log-2',
-        timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(), // 12 mins ago
-        domain: 'freefiremobile.com',
-        rootDomain: 'freefiremobile.com',
-        deviceName: 'ABBU-Phone',
-        clientIp: '192.168.1.15',
-        status: 'blocked',
-        matchedRule: 'Watchlist Match & Per-User Block',
-        profileName: 'ABBU'
-      },
-      {
-        id: 'log-3',
-        timestamp: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
-        domain: 'google.com',
-        rootDomain: 'google.com',
-        deviceName: 'MINE-iPhone',
-        clientIp: '192.168.1.11',
-        status: 'allowed',
-        profileName: 'MINE'
-      },
-      {
-        id: 'log-4',
-        timestamp: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
-        domain: 'roblox-unblocked.org',
-        rootDomain: 'roblox-unblocked.org',
-        deviceName: 'Guest-Laptop',
-        clientIp: '192.168.1.20',
-        status: 'blocked',
-        matchedRule: 'Per-User Block',
-        profileName: 'Others'
-      },
-      {
-        id: 'log-5',
-        timestamp: new Date(Date.now() - 60 * 1000 * 65).toISOString(),
-        domain: 'malware-distribution-node.info',
-        rootDomain: 'malware-distribution-node.info',
-        deviceName: 'Home-Router',
-        clientIp: '192.168.1.1',
-        status: 'blocked',
-        matchedRule: 'Threat Feed Ingestion',
-        profileName: 'Router'
-      }
-    ];
+    const defaultLogs: LogEntry[] = [];
     await ensureFile<LogEntry[]>(LOGS_FILE, defaultLogs);
 
     // Initialize Alert logs
-    const defaultAlerts: AlertLogEntry[] = [
-      {
-        id: 'alert-1',
-        timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-        user: 'abbu',
-        domain: 'freefiremobile.com',
-        deviceName: 'ABBU-Phone',
-        type: 'watchlist',
-        status: 'sent'
-      },
-      {
-        id: 'alert-2',
-        timestamp: new Date(Date.now() - 60 * 1000 * 65).toISOString(),
-        user: 'router',
-        domain: 'malware-distribution-node.info',
-        deviceName: 'Home-Router',
-        type: 'new_block',
-        status: 'sent'
-      }
-    ];
+    const defaultAlerts: AlertLogEntry[] = [];
     await ensureFile<AlertLogEntry[]>(ALERTS_FILE, defaultAlerts);
 
     // Initialize Seen Domains (for deduplication)
-    const todayStr = new Date().toISOString().split('T')[0];
-    const defaultSeen: { [key: string]: string } = {
-      'router:malware-distribution-node.info': todayStr
-    };
+    const defaultSeen: { [key: string]: string } = {};
     await ensureFile<{ [key: string]: string }>(SEEN_DOMAINS_FILE, defaultSeen);
 
     this.initialized = true;

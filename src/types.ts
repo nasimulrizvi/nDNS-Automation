@@ -87,6 +87,24 @@ export interface UserAnalytics {
   };
 }
 
+export interface DeviceBlockedDomain {
+  domain: string;
+  blocks: number;
+  lastBlockedAt: string;
+}
+
+export interface DeviceAnalytics {
+  deviceName: string;
+  clientIp: string;
+  profileName: string;
+  totalQueries: number;
+  blockedQueries: number;
+  blockedPercentage: number;
+  blockedDomains: DeviceBlockedDomain[];
+  topDomains: AnalyticsDomain[];
+  lastActive: string;
+}
+
 export interface SystemState {
   settings: AppSettings;
   profiles: NextDNSProfile[];

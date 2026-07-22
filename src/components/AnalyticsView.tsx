@@ -1,24 +1,37 @@
 import { useState, useEffect } from 'react';
-import { UserAnalytics } from '../types';
+import { UserAnalytics, DeviceAnalytics } from '../types';
 import { ClientAPI } from '../api';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, Legend } from 'recharts';
-import { BarChart3, PieChartIcon, ArrowRightLeft, Users, ShieldAlert, RefreshCw } from 'lucide-react';
+import { BarChart3, PieChartIcon, ArrowRightLeft, Users, ShieldAlert, RefreshCw, Smartphone, Layers, Laptop, User, Wifi, Shield } from 'lucide-react';
 
 export default function AnalyticsView() {
   const [analytics, setAnalytics] = useState<UserAnalytics[]>([]);
+  const [deviceAnalytics, setDeviceAnalytics] = useState<DeviceAnalytics[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'profile' | 'device'>('profile');
   const [selectedUser, setSelectedUser] = useState<string>('');
+  const [selectedDeviceName, setSelectedDeviceName] = useState<string>('');
   const [error, setError] = useState('');
 
   const fetchAnalytics = async () => {
     setLoading(true);
     setError('');
     try {
-      const data = await ClientAPI.getAnalytics();
-      const safeData = Array.isArray(data) ? data : [];
-      setAnalytics(safeData);
-      if (safeData.length > 0) {
-        setSelectedUser(safeData[0].username);
+      const [pData, dData] = await Promise.all([
+        ClientAPI.getAnalytics(),
+        ClientAPI.getDeviceAnalytics()
+      ]);
+      const safeP = Array.isArray(pData) ? pData : [];
+      const safeD = Array.isArray(dData) ? dData : [];
+
+      setAnalytics(safeP);
+      setDeviceAnalytics(safeD);
+
+      if (safeP.length > 0 && !selectedUser) {
+        setSelectedUser(safeP[0].username);
+      }
+      if (safeD.length > 0 && !selectedDeviceName) {
+        setSelectedDeviceName(safeD[0].deviceName);
       }
     } catch (err: any) {
       console.error('Error fetching analytics:', err);
@@ -33,59 +46,121 @@ export default function AnalyticsView() {
   }, []);
 
   const activeAnalytics = analytics.find(a => a.username === selectedUser) || analytics[0];
+  const activeDevice = deviceAnalytics.find(d => d.deviceName === selectedDeviceName) || deviceAnalytics[0];
 
+  // Profile chart data
   const totalQueries = activeAnalytics?.summary?.totalQueries ?? 0;
   const totalBlocks = activeAnalytics?.summary?.totalBlocks ?? 0;
   const blockedPercentage = activeAnalytics?.summary?.blockedPercentage ?? 0;
   const allowedQueries = Math.max(0, totalQueries - totalBlocks);
 
-  // Prepare chart data for top domains
-  const topDomainsChartData = (activeAnalytics?.topDomains || []).map(d => {
+  const profileChartData = (activeAnalytics?.topDomains || []).map(d => {
     const domainName = d?.domain || (d as any)?.name || 'Unknown';
-    const queries = typeof d?.queries === 'number' ? d.queries : 0;
-    const blocks = typeof d?.blocks === 'number' ? d.blocks : 0;
     return {
       name: domainName.length > 20 ? domainName.substring(0, 18) + '...' : domainName,
-      Queries: queries,
-      Blocks: blocks
+      Queries: typeof d?.queries === 'number' ? d.queries : 0,
+      Blocks: typeof d?.blocks === 'number' ? d.blocks : 0
     };
   });
 
-  // Prepare chart data for domain category distribution (Blocked vs Allowed)
-  const pieChartData = activeAnalytics ? [
+  const profilePieData = activeAnalytics ? [
     { name: 'Allowed Queries', value: allowedQueries },
     { name: 'Blocked Ads & Threats', value: totalBlocks }
+  ] : [];
+
+  // Device chart data
+  const devQueries = activeDevice?.totalQueries ?? 0;
+  const devBlocks = activeDevice?.blockedQueries ?? 0;
+  const devPct = activeDevice?.blockedPercentage ?? 0;
+  const devAllowed = Math.max(0, devQueries - devBlocks);
+
+  const deviceChartData = (activeDevice?.topDomains || []).map(d => {
+    const domainName = d?.domain || 'Unknown';
+    return {
+      name: domainName.length > 20 ? domainName.substring(0, 18) + '...' : domainName,
+      Queries: typeof d?.queries === 'number' ? d.queries : 0,
+      Blocks: typeof d?.blocks === 'number' ? d.blocks : 0
+    };
+  });
+
+  const devicePieData = activeDevice ? [
+    { name: 'Allowed Queries', value: devAllowed },
+    { name: 'Blocked Ads & Threats', value: devBlocks }
   ] : [];
 
   return (
     <div className="space-y-6" id="analytics-view-container">
       {/* Top Header Controls */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <BarChart3 size={20} className="text-blue-400" />
-            Security Analytics & Reporting
+            Security Analytics & Traffic Reports
           </h2>
-          <p className="text-xs text-slate-400 mt-1">Cross-profile domain distribution and traffic patterns across the last 7 days.</p>
+          <p className="text-xs text-slate-400 mt-1">Cross-profile and device-specific DNS traffic distribution and threat analytics.</p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          {/* User Filter Tab List */}
-          <div className="flex bg-slate-900/60 p-1 rounded-xl border border-slate-800 overflow-x-auto">
-            {analytics.map(user => (
-              <button
-                key={user.username}
-                onClick={() => setSelectedUser(user.username)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${
-                  selectedUser === user.username
-                    ? 'bg-blue-600 text-white shadow'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {user.username.split(' ')[0]} {/* Grab first word */}
-              </button>
-            ))}
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          {/* Toggle Profile vs Device Analytics */}
+          <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => setViewMode('profile')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                viewMode === 'profile'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Layers size={14} />
+              <span>Profiles</span>
+            </button>
+            <button
+              onClick={() => setViewMode('device')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                viewMode === 'device'
+                  ? 'bg-cyan-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Smartphone size={14} />
+              <span>Per Device</span>
+            </button>
           </div>
+
+          {/* Sub-selector */}
+          {viewMode === 'profile' ? (
+            <div className="flex bg-slate-900/60 p-1 rounded-xl border border-slate-800 overflow-x-auto max-w-full">
+              {analytics.map(user => (
+                <button
+                  key={user.username}
+                  onClick={() => setSelectedUser(user.username)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${
+                    selectedUser === user.username
+                      ? 'bg-blue-600/30 text-blue-300 border border-blue-500/30'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {user.username.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex bg-slate-900/60 p-1 rounded-xl border border-slate-800 overflow-x-auto max-w-full">
+              {deviceAnalytics.map(dev => (
+                <button
+                  key={dev.deviceName}
+                  onClick={() => setSelectedDeviceName(dev.deviceName)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${
+                    selectedDeviceName === dev.deviceName
+                      ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/30'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {dev.deviceName}
+                </button>
+              ))}
+            </div>
+          )}
 
           <button
             onClick={fetchAnalytics}
@@ -113,181 +188,218 @@ export default function AnalyticsView() {
             Retry Fetch
           </button>
         </div>
-      ) : !activeAnalytics ? (
-        <div className="p-8 text-center text-slate-500 text-sm">No profiles found.</div>
-      ) : (
-        <div className="space-y-6">
-          {/* Traffic Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
-              <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-xl">
-                <ArrowRightLeft size={18} />
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Total Queries</span>
-                <h4 className="text-lg font-bold text-white mt-0.5">{totalQueries.toLocaleString()}</h4>
-              </div>
-            </div>
-
-            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
-              <div className="p-2.5 bg-red-500/10 text-red-400 rounded-xl">
-                <ShieldAlert size={18} />
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Blocked Queries</span>
-                <h4 className="text-lg font-bold text-red-400 mt-0.5">{totalBlocks.toLocaleString()}</h4>
-              </div>
-            </div>
-
-            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
-              <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl">
-                <Users size={18} />
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Profile Block Rate</span>
-                <h4 className="text-lg font-bold text-emerald-400 mt-0.5">{blockedPercentage}%</h4>
-              </div>
-            </div>
-          </div>
-
-          {/* Charts Layout */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Bar Chart: Most Visited/Blocked Domains */}
-            <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="text-sm font-bold text-slate-100">Top Domains Chart</h3>
-                <span className="text-[10px] bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded font-mono">
-                  Unit: Absolute Query Count
-                </span>
-              </div>
-
-              <div className="h-[280px] w-full text-xs font-mono">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={topDomainsChartData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                    <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                    <YAxis tickLine={false} axisLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
-                      labelStyle={{ color: '#fff', fontWeight: 'bold' }}
-                    />
-                    <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="Queries" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="Blocks" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Pie Chart: Allowed vs Blocked Traffic Ratio */}
-            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                  <PieChartIcon size={14} className="text-blue-400" />
-                  Traffic Quality Ratio
-                </h3>
-                <p className="text-[10px] text-slate-400">Total queries processed and cataloged by NextDNS firewall.</p>
-              </div>
-
-              <div className="h-[200px] w-full flex justify-center items-center relative">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieChartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={55}
-                      outerRadius={75}
-                      paddingAngle={4}
-                      dataKey="value"
-                    >
-                      {pieChartData.map((_entry, idx) => (
-                        <Cell key={`cell-${idx}`} fill={idx === 0 ? '#3b82f6' : '#ef4444'} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                {/* Center text overlay */}
-                <div className="absolute text-center">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Blocked</span>
-                  <span className="text-base font-extrabold text-red-400">{blockedPercentage}%</span>
+      ) : viewMode === 'profile' ? (
+        /* --- PROFILE ANALYTICS CONTENT --- */
+        !activeAnalytics ? (
+          <div className="p-8 text-center text-slate-500 text-sm">No profiles found.</div>
+        ) : (
+          <div className="space-y-6">
+            {/* Traffic Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
+                <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-xl">
+                  <ArrowRightLeft size={18} />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Total Queries</span>
+                  <h4 className="text-lg font-bold text-white mt-0.5">{totalQueries.toLocaleString()}</h4>
                 </div>
               </div>
 
-              {/* Legend mapping */}
-              <div className="space-y-2 pt-3 border-t border-slate-800/60 text-xs">
-                {pieChartData.map((entry, idx) => (
-                  <div key={entry.name} className="flex justify-between items-center font-mono">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: idx === 0 ? '#3b82f6' : '#ef4444' }} />
-                      <span className="text-slate-300 text-[11px]">{entry.name}</span>
-                    </div>
-                    <span className="font-bold text-slate-200">{(entry.value ?? 0).toLocaleString()}</span>
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
+                <div className="p-2.5 bg-red-500/10 text-red-400 rounded-xl">
+                  <ShieldAlert size={18} />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Blocked Queries</span>
+                  <h4 className="text-lg font-bold text-red-400 mt-0.5">{totalBlocks.toLocaleString()}</h4>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
+                <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl">
+                  <Users size={18} />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Profile Block Rate</span>
+                  <h4 className="text-lg font-bold text-emerald-400 mt-0.5">{blockedPercentage}%</h4>
+                </div>
+              </div>
+            </div>
+
+            {/* Charts Layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-sm font-bold text-slate-100">Top Domains Chart ({activeAnalytics.username})</h3>
+                  <span className="text-[10px] bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded font-mono">
+                    Query Count
+                  </span>
+                </div>
+
+                <div className="h-[280px] w-full text-xs font-mono">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={profileChartData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
+                      <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                      <YAxis tickLine={false} axisLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
+                        labelStyle={{ color: '#fff', fontWeight: 'bold' }}
+                      />
+                      <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="Queries" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Blocks" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
+                    <PieChartIcon size={14} className="text-blue-400" />
+                    Traffic Quality Ratio
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Queries processed and filtered by NextDNS firewall.</p>
+                </div>
+
+                <div className="h-[200px] w-full flex justify-center items-center relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={profilePieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={75}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        <Cell fill="#3b82f6" />
+                        <Cell fill="#ef4444" />
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute text-center pointer-events-none">
+                    <span className="text-xl font-bold text-white block">{blockedPercentage}%</span>
+                    <span className="text-[9px] text-slate-400 uppercase font-semibold">Blocked</span>
                   </div>
-                ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-center text-xs pt-3 border-t border-slate-800">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Allowed</span>
+                    <span className="font-bold text-blue-400">{allowedQueries.toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Blocked</span>
+                    <span className="font-bold text-red-400">{totalBlocks.toLocaleString()}</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+        )
+      ) : (
+        /* --- DEVICE ANALYTICS CONTENT --- */
+        !activeDevice ? (
+          <div className="p-8 text-center text-slate-500 text-sm">No device data found.</div>
+        ) : (
+          <div className="space-y-6">
+            {/* Device Info & Traffic Summary Cards */}
+            <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 rounded-2xl">
+                  <Smartphone size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    {activeDevice.deviceName}
+                    <span className="text-xs font-mono font-normal bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full">
+                      {activeDevice.clientIp}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Profile Endpoint: <span className="text-cyan-400 font-semibold">{activeDevice.profileName}</span>
+                  </p>
+                </div>
+              </div>
 
-          {/* Table Breakdown of Top 10 Domains */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4">
-            <h3 className="text-sm font-bold text-slate-100">Top Domains Traffic Breakdown</h3>
-            
-            <div className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/30">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
-                    <th className="px-4 py-2.5">Domain Name</th>
-                    <th className="px-4 py-2.5 text-right">Total Queries</th>
-                    <th className="px-4 py-2.5 text-right">Blocks Triggered</th>
-                    <th className="px-4 py-2.5 text-right">Resolution Security Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40 font-mono">
-                  {(activeAnalytics.topDomains || []).length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="px-4 py-6 text-center text-slate-500 text-xs">
-                        No domain traffic recorded for this profile yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    (activeAnalytics.topDomains || []).map((item, idx) => {
-                      const domainName = item?.domain || (item as any)?.name || `domain-${idx}`;
-                      const queries = typeof item?.queries === 'number' ? item.queries : 0;
-                      const blocks = typeof item?.blocks === 'number' ? item.blocks : 0;
-                      const blockRate = queries > 0 ? ((blocks / queries) * 100) : 0;
-                      
-                      return (
-                        <tr key={domainName} className="hover:bg-slate-900/20 text-slate-300">
-                          <td className="px-4 py-3 select-all">{domainName}</td>
-                          <td className="px-4 py-3 text-right">{queries.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-right text-red-400">{blocks.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-right">
-                            {blockRate >= 99.9 ? (
-                              <span className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/25 px-2 py-0.5 rounded-full font-bold">
-                                Fully Blocked
-                              </span>
-                            ) : blockRate > 0 ? (
-                              <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/25 px-2 py-0.5 rounded-full font-bold">
-                                Partially Filtered
-                              </span>
-                            ) : (
-                              <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded-full font-bold">
-                                Allowed
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+              <div className="grid grid-cols-3 gap-3 w-full md:w-auto">
+                <div className="bg-slate-950/80 px-4 py-2 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] text-slate-400 block uppercase font-semibold">Queries</span>
+                  <span className="text-base font-bold text-slate-100">{devQueries.toLocaleString()}</span>
+                </div>
+                <div className="bg-slate-950/80 px-4 py-2 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] text-slate-400 block uppercase font-semibold">Blocked</span>
+                  <span className="text-base font-bold text-emerald-400">{devBlocks.toLocaleString()}</span>
+                </div>
+                <div className="bg-slate-950/80 px-4 py-2 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] text-slate-400 block uppercase font-semibold">Block Rate</span>
+                  <span className="text-base font-bold text-cyan-300">{devPct}%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Device Charts Layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <Smartphone size={16} className="text-cyan-400" />
+                    Top Blocked & Access Domains for {activeDevice.deviceName}
+                  </h3>
+                  <span className="text-[10px] bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded font-mono">
+                    Per-Device Activity
+                  </span>
+                </div>
+
+                <div className="h-[280px] w-full text-xs font-mono">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={deviceChartData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
+                      <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                      <YAxis tickLine={false} axisLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
+                        labelStyle={{ color: '#fff', fontWeight: 'bold' }}
+                      />
+                      <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="Queries" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Blocks" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Blocked Domains Detailed List */}
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
+                    <Shield size={16} className="text-red-400" />
+                    Blocked Domains Breakdown
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Specific domains blocked for {activeDevice.deviceName}</p>
+                </div>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {activeDevice.blockedDomains.map((bd, i) => (
+                    <div key={i} className="p-2.5 bg-slate-950 border border-slate-800/80 rounded-xl flex justify-between items-center text-xs">
+                      <div className="font-mono text-slate-200 truncate max-w-[170px]" title={bd.domain}>
+                        {bd.domain}
+                      </div>
+                      <span className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded font-bold">
+                        {bd.blocks} blocks
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )
       )}
     </div>
   );

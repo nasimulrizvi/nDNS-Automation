@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { Watchlist } from '../types';
-import { ShieldAlert, Plus, Trash2, Search, AlertCircle, Terminal } from 'lucide-react';
+import { ClientAPI } from '../api';
+import { ShieldAlert, Plus, Trash2, Search, AlertCircle, Terminal, Send, CheckCircle2 } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface WatchlistViewProps {
@@ -12,6 +13,22 @@ export default function WatchlistView({ watchlist, onSaveWatchlist }: WatchlistV
   const [searchQuery, setSearchQuery] = useState('');
   const [newDomain, setNewDomain] = useState('');
   const [error, setError] = useState('');
+  const [testingAlert, setTestingAlert] = useState(false);
+  const [testResult, setTestResult] = useState<string>('');
+
+  const handleTestAlert = async () => {
+    setTestingAlert(true);
+    setError('');
+    setTestResult('');
+    try {
+      const res = await ClientAPI.testWatchlistAlert();
+      setTestResult(res.message);
+    } catch (err: any) {
+      setError(err.message || 'Test Telegram alert failed.');
+    } finally {
+      setTestingAlert(false);
+    }
+  };
 
   const handleAddDomain = async (e: FormEvent) => {
     e.preventDefault();
@@ -181,6 +198,23 @@ export default function WatchlistView({ watchlist, onSaveWatchlist }: WatchlistV
                 Watch Domain
               </button>
             </form>
+
+            {testResult && (
+              <div className="bg-emerald-950/40 border border-emerald-500/30 p-2.5 rounded-lg flex items-center gap-2 text-[11px] text-emerald-400">
+                <CheckCircle2 size={14} className="shrink-0 text-emerald-400" />
+                <span>{testResult}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleTestAlert}
+              disabled={testingAlert}
+              className="w-full flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 px-4 rounded-xl font-semibold text-xs border border-slate-700/80 transition disabled:opacity-50"
+            >
+              <Send size={13} className={testingAlert ? "animate-pulse text-red-400" : "text-slate-400"} />
+              {testingAlert ? "Dispatching Telegram Alert..." : "Test Telegram Alert Dispatch"}
+            </button>
 
             <div className="pt-3 border-t border-slate-800/60 text-[11px] text-slate-400 leading-normal space-y-2">
               <span className="font-semibold text-slate-300 block">Typical Use-Cases:</span>

@@ -1,4 +1,4 @@
-import { SystemState, UserAnalytics, AppSettings, Blocklists, Watchlist, ThreatFeed } from './types';
+import { SystemState, UserAnalytics, DeviceAnalytics, AppSettings, Blocklists, Watchlist, ThreatFeed } from './types';
 
 export class ClientAPI {
   private static async request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -27,6 +27,11 @@ export class ClientAPI {
     return res.analytics;
   }
 
+  static async getDeviceAnalytics(): Promise<DeviceAnalytics[]> {
+    const res = await this.request<{ devices: DeviceAnalytics[] }>('/api/analytics/devices');
+    return res.devices;
+  }
+
   static async saveSettings(settings: AppSettings): Promise<void> {
     await this.request('/api/settings', {
       method: 'POST',
@@ -41,10 +46,22 @@ export class ClientAPI {
     });
   }
 
+  static async pullDenylists(): Promise<{ message: string }> {
+    return await this.request<{ message: string }>('/api/blocklists/pull', {
+      method: 'POST',
+    });
+  }
+
   static async saveWatchlist(watchlist: Watchlist): Promise<void> {
     await this.request('/api/watchlist', {
       method: 'POST',
       body: JSON.stringify({ watchlist }),
+    });
+  }
+
+  static async testWatchlistAlert(): Promise<{ message: string }> {
+    return await this.request<{ message: string }>('/api/watchlist/test-alert', {
+      method: 'POST',
     });
   }
 

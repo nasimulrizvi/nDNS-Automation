@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { Blocklists } from '../types';
-import { Shield, Plus, Trash2, Search, AlertCircle, RefreshCw, Globe, Wifi, User, Heart, ShieldCheck, Users } from 'lucide-react';
+import { ClientAPI } from '../api';
+import { Shield, Plus, Trash2, Search, AlertCircle, RefreshCw, Globe, Wifi, User, Heart, ShieldCheck, Users, Download, CheckCircle2 } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface BlocklistConfigViewProps {
@@ -18,6 +19,24 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
   const [newDomain, setNewDomain] = useState('');
   const [error, setError] = useState('');
   const [unsyncedChanges, setUnsyncedChanges] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [pullMessage, setPullMessage] = useState('');
+
+  const handlePullFromNextDNS = async () => {
+    setPulling(true);
+    setError('');
+    setPullMessage('');
+    try {
+      const res = await ClientAPI.pullDenylists();
+      setPullMessage(res.message);
+      // Reload page state by triggering sync/refresh
+      await onSync();
+    } catch (err: any) {
+      setError(err.message || 'Failed to pull denylists from NextDNS');
+    } finally {
+      setPulling(false);
+    }
+  };
 
   // Map tabs to active domains
   const getActiveDomains = (): string[] => {
@@ -181,20 +200,39 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
               </p>
             </div>
 
-            {/* Search Input */}
-            <div className="relative w-full sm:w-64">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
-                <Search size={14} />
-              </span>
-              <input
-                type="text"
-                placeholder="Search domains..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl pl-9 pr-4 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
+            {/* Controls: Search + Pull Denylists */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={handlePullFromNextDNS}
+                disabled={pulling}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/80 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50 shrink-0"
+              >
+                <Download size={13} className={pulling ? "animate-bounce text-blue-400" : "text-blue-400"} />
+                {pulling ? "Pulling..." : "Pull from NextDNS"}
+              </button>
+
+              <div className="relative w-full sm:w-56">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+                  <Search size={14} />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search domains..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-900/60 border border-slate-800 rounded-xl pl-9 pr-4 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
             </div>
           </div>
+
+          {pullMessage && (
+            <div className="bg-blue-950/40 border border-blue-500/30 p-2.5 rounded-lg flex items-center gap-2 text-[11px] text-blue-300">
+              <CheckCircle2 size={14} className="shrink-0 text-blue-400" />
+              <span>{pullMessage}</span>
+            </div>
+          )}
 
           {/* List display */}
           <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl overflow-hidden">

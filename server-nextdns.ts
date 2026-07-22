@@ -5,6 +5,8 @@ import { LogEntry, AlertLogEntry, NextDNSProfile } from './src/types';
 
 export class NextDNSService {
   private static activeSSEListeners: { [profileId: string]: any } = {};
+  private static deviceAnalyticsCache: { data: any[]; timestamp: number } | null = null;
+  private static CACHE_TTL_MS = 30000; // 30 seconds cache TTL
 
   // Dynamically aggregate and fetch profile data from NextDNS or mock dynamically
   static async getDynamicProfiles(): Promise<NextDNSProfile[]> {
@@ -61,8 +63,8 @@ export class NextDNSService {
       const mergedProfiles: NextDNSProfile[] = [];
 
       for (const apiP of apiProfiles) {
-        let queries = 120;
-        let blocks = 15;
+        let queries = 0;
+        let blocks = 0;
         
         try {
           const res = await fetch(`https://api.nextdns.io/profiles/${apiP.id}/analytics/status?from=-7d`, {
@@ -70,24 +72,24 @@ export class NextDNSService {
           });
           if (res.ok) {
             const json = await res.json() as any;
-            const dataArr = json.data || [];
+            const dataArr = json.data || (Array.isArray(json) ? json : []);
             let totalQ = 0;
             let totalB = 0;
             for (const item of dataArr) {
-              totalQ += item.queries || 0;
-              if (item.status === 'blocked') {
-                totalB += item.queries || 0;
+              const sCount = typeof item.queries === 'number' ? item.queries : (item.count || item.blocks || 0);
+              const sKey = (item.id || item.status || item.name || '').toString().toLowerCase();
+              totalQ += sCount;
+              if (sKey === 'blocked' || sKey === 'denied' || sKey === 'blacklist' || sKey === 'block') {
+                totalB += sCount;
               }
             }
-            // Use fallback if status returns zero
-            queries = totalQ || 120;
-            blocks = totalB || 15;
+            queries = totalQ;
+            blocks = totalB;
           }
         } catch (e) {
           console.error(`Error fetching real analytics for profile ${apiP.id}:`, e);
-          const match = localProfiles.find(p => p.id === apiP.id);
-          queries = match ? match.queriesLast7Days : 120;
-          blocks = match ? match.blocksLast7Days : 15;
+          queries = 0;
+          blocks = 0;
         }
 
         // Dynamically calculate active rules count based on blocklists.json
@@ -102,11 +104,26 @@ export class NextDNSService {
         const perUserCount = blocklists.perUser[userKey]?.length || 0;
         const activeRulesCount = blocklists.general.length + perUserCount;
 
-        // Devices count from logs, fallback to historical value
+        // Devices count from NextDNS API or logs
+        let deviceCount = 0;
+        try {
+          const devRes = await fetch(`https://api.nextdns.io/profiles/${apiP.id}/analytics/devices?from=-7d&limit=100`, {
+            headers: { 'X-Api-Key': settings.nextDnsApiKey },
+          });
+          if (devRes.ok) {
+            const devJson = await devRes.json() as any;
+            const devArr = devJson.data || [];
+            deviceCount = devArr.length;
+          }
+        } catch (e) {}
+
+        if (deviceCount === 0) {
+          const profileLogs = logs.filter(l => l.profileName?.toLowerCase() === apiP.name.toLowerCase() || l.profileName === apiP.id);
+          const uniqueDevices = new Set(profileLogs.map(l => l.deviceName));
+          deviceCount = uniqueDevices.size;
+        }
+
         const existing = localProfiles.find(p => p.id === apiP.id);
-        const profileLogs = logs.filter(l => l.profileName?.toLowerCase() === apiP.name.toLowerCase() || l.profileName === apiP.id);
-        const uniqueDevices = new Set(profileLogs.map(l => l.deviceName));
-        const deviceCount = uniqueDevices.size || (existing ? existing.deviceCount : 3);
         const status = existing ? existing.status : 'active';
 
         mergedProfiles.push({
@@ -243,78 +260,112 @@ export class NextDNSService {
     }
   }
 
-  // Fetch top domains analytics for a profile
-  static async fetchTopDomains(profileId: string, limit = 10): Promise<any[]> {
+  // Fetch denylist from NextDNS API
+  static async fetchDenylistFromAPI(profileId: string): Promise<string[]> {
     const settings = await ServerDB.getSettings();
-    if (!settings.nextDnsApiKey) {
-      // Return high-fidelity mockup data for dashboard
-      return this.getMockTopDomains(profileId, limit);
-    }
+    if (!settings.nextDnsApiKey) return [];
 
     try {
-      const res = await fetch(`https://api.nextdns.io/profiles/${profileId}/analytics/domains?limit=${limit}&from=-7d`, {
+      const res = await fetch(`https://api.nextdns.io/profiles/${profileId}/denylist`, {
         headers: { 'X-Api-Key': settings.nextDnsApiKey },
       });
       if (res.ok) {
         const json = await res.json() as any;
-        const rawList = json.data || [];
-        return rawList.map((item: any) => ({
-          domain: item.domain || item.name || 'unknown.domain',
-          queries: typeof item.queries === 'number' ? item.queries : (item.count || 0),
-          blocks: typeof item.blocks === 'number' ? item.blocks : 0
-        }));
+        const list = json.data || (Array.isArray(json) ? json : []);
+        return list.map((item: any) => typeof item === 'string' ? item : (item.id || item.domain)).filter(Boolean);
       }
     } catch (e) {
-      console.error(`Error fetching analytics for profile ${profileId}:`, e);
+      console.error(`Error fetching denylist for profile ${profileId}:`, e);
     }
-    return this.getMockTopDomains(profileId, limit);
+    return [];
   }
 
-  // Mock domain analytics mapping
-  private static getMockTopDomains(profileId: string, limit: number): any[] {
-    const mockRouter = [
-      { domain: 'doubleclick.net', queries: 4500, blocks: 4500 },
-      { domain: 'google.com', queries: 8200, blocks: 0 },
-      { domain: 'netflix.com', queries: 6200, blocks: 0 },
-      { domain: 'facebook.com', queries: 3100, blocks: 0 },
-      { domain: 'ads-server-xyz.com', queries: 390, blocks: 390 }
-    ];
+  // Pull denylists from NextDNS API for all profiles and merge into blocklists
+  static async pullDenylistsFromNextDNS(): Promise<{ success: boolean; message: string }> {
+    const settings = await ServerDB.getSettings();
+    if (!settings.nextDnsApiKey) {
+      return { success: false, message: 'NextDNS API Key is missing. Configure API key in Settings.' };
+    }
 
-    const mockMine = [
-      { domain: 'github.com', queries: 4500, blocks: 0 },
-      { domain: 'google.com', queries: 3200, blocks: 0 },
-      { domain: 'doubleclick.net', queries: 2200, blocks: 2200 },
-      { domain: 'stackoverflow.com', queries: 1950, blocks: 0 },
-      { domain: 'hackernews-time-waster.org', queries: 630, blocks: 630 },
-      { domain: 'youtube.com', queries: 810, blocks: 0 },
-      { domain: 'distraction-reddit.com', queries: 570, blocks: 570 }
-    ];
+    try {
+      const profiles = await this.getDynamicProfiles();
+      const currentBlocklists = await ServerDB.getBlocklists();
+      let importedCount = 0;
 
-    const mockAmmu = [
-      { domain: 'instagram.com', queries: 3100, blocks: 350 },
-      { domain: 'tiktok.com', queries: 2500, blocks: 2500 },
-      { domain: 'whatsapp.net', queries: 1200, blocks: 0 },
-      { domain: 'pinterest.com', queries: 420, blocks: 0 }
-    ];
+      for (const profile of profiles) {
+        let userKey = 'others';
+        const nameLower = profile.name.toLowerCase();
+        if (nameLower.includes('router')) userKey = 'router';
+        else if (nameLower.includes('mine')) userKey = 'mine';
+        else if (nameLower.includes('ammu')) userKey = 'ammu';
+        else if (nameLower.includes('abbu')) userKey = 'abbu';
+        else if (nameLower.includes('others')) userKey = 'others';
 
-    const mockAbbu = [
-      { domain: 'tiktok.com', queries: 1800, blocks: 1800 },
-      { domain: 'freefiremobile.com', queries: 1450, blocks: 1450 },
-      { domain: 'news.google.com', queries: 920, blocks: 0 },
-      { domain: 'facebook.com', queries: 850, blocks: 0 }
-    ];
+        const remoteDomains = await this.fetchDenylistFromAPI(profile.id);
+        if (remoteDomains.length > 0) {
+          const existingPerUser = currentBlocklists.perUser[userKey] || [];
+          const merged = Array.from(new Set([...existingPerUser, ...remoteDomains])).sort();
+          currentBlocklists.perUser[userKey] = merged;
+          importedCount += remoteDomains.length;
+        }
+      }
 
-    const mockOthers = [
-      { domain: 'roblox-unblocked.org', queries: 2200, blocks: 2200 },
-      { domain: 'gaming-portal-distraction.net', queries: 950, blocks: 950 },
-      { domain: 'youtube.com', queries: 1200, blocks: 0 }
-    ];
+      await ServerDB.saveBlocklists(currentBlocklists);
+      return {
+        success: true,
+        message: `Successfully pulled denylists from NextDNS! Processed ${importedCount} active rules across ${profiles.length} profiles.`
+      };
+    } catch (e: any) {
+      return { success: false, message: `Failed to pull denylists from NextDNS: ${e.message}` };
+    }
+  }
 
-    if (profileId === '3e1c94') return mockRouter.slice(0, limit);
-    if (profileId === 'd76372') return mockMine.slice(0, limit);
-    if (profileId === 'c9e833') return mockAmmu.slice(0, limit);
-    if (profileId === '92b815') return mockAbbu.slice(0, limit);
-    return mockOthers.slice(0, limit);
+  // Fetch top domains analytics for a profile
+  static async fetchTopDomains(profileId: string, limit = 10): Promise<any[]> {
+    const settings = await ServerDB.getSettings();
+    if (settings.nextDnsApiKey) {
+      try {
+        const res = await fetch(`https://api.nextdns.io/profiles/${profileId}/analytics/domains?limit=${limit}&from=-7d`, {
+          headers: { 'X-Api-Key': settings.nextDnsApiKey },
+        });
+        if (res.ok) {
+          const json = await res.json() as any;
+          const rawList = json.data || [];
+          return rawList.map((item: any) => ({
+            domain: item.domain || item.name || 'unknown.domain',
+            queries: typeof item.queries === 'number' ? item.queries : (item.count || 0),
+            blocks: typeof item.blocks === 'number' ? item.blocks : 0
+          }));
+        }
+      } catch (e) {
+        console.error(`Error fetching analytics for profile ${profileId}:`, e);
+      }
+    }
+
+    // Derive top domains from actual recorded DB logs
+    const logs = await ServerDB.getLogs();
+    const profile = (await ServerDB.getProfiles()).find(p => p.id === profileId);
+    const profileLogs = logs.filter(l => l.profileName === profile?.name || l.profileName?.toLowerCase() === profileId.toLowerCase());
+    
+    const domainCounts: { [dom: string]: { queries: number; blocks: number } } = {};
+    for (const log of profileLogs) {
+      if (!domainCounts[log.domain]) {
+        domainCounts[log.domain] = { queries: 0, blocks: 0 };
+      }
+      domainCounts[log.domain].queries += 1;
+      if (log.status === 'blocked') {
+        domainCounts[log.domain].blocks += 1;
+      }
+    }
+
+    return Object.keys(domainCounts)
+      .map(dom => ({
+        domain: dom,
+        queries: domainCounts[dom].queries,
+        blocks: domainCounts[dom].blocks
+      }))
+      .sort((a, b) => b.queries - a.queries)
+      .slice(0, limit);
   }
 
   // Telegram alerts sending engine
@@ -348,6 +399,8 @@ export class NextDNSService {
     }
   }
 
+  private static alertCooldowns: { [key: string]: number } = {};
+
   // Central block log processing + alert trigger
   static async processBlockEvent(
     profileId: string, 
@@ -359,6 +412,17 @@ export class NextDNSService {
     const watchlist = await ServerDB.getWatchlist();
     const seenDomains = await ServerDB.getSeenDomains();
     const todayStr = new Date().toISOString().split('T')[0];
+
+    // Formatted timestamp: YYYY-MM-DD HH:mm:ss
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const now = new Date();
+    const timeFormatted = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+    // Device Display formatting: "Khalamoni", "Laptop (192.168.1.15)", "103.177.55.69"
+    let deviceDisplay = deviceName || clientIp || 'Unknown Device';
+    if (clientIp && clientIp !== '0.0.0.0' && clientIp !== deviceName) {
+      deviceDisplay = `${deviceName} (${clientIp})`;
+    }
 
     // Check if domain matches any watchlisted target (root match support)
     const isWatchlisted = watchlist.domains.some(w => {
@@ -376,8 +440,8 @@ export class NextDNSService {
     else if (nameLower.includes('others')) userKey = 'others';
 
     // 1. Log block in our history database
-    const newLog = await ServerDB.addLog({
-      timestamp: new Date().toISOString(),
+    await ServerDB.addLog({
+      timestamp: now.toISOString(),
       domain,
       rootDomain: domain,
       deviceName,
@@ -387,19 +451,18 @@ export class NextDNSService {
       profileName
     });
 
-    // 2. Watchlist alert — instant send with zero deduplication
+    // 2. Watchlist alert — instant send
     if (isWatchlisted) {
       const alertMsg = `🚨 <b>Watchlist Access Violation Triggered!</b>\n\n` +
-        `👤 <b>User Profile:</b> ${profileName} (${userKey})\n` +
-        `🌐 <b>Blocked Domain:</b> <code>${domain}</code>\n` +
-        `📱 <b>Device:</b> ${deviceName}\n` +
-        `🔌 <b>Client IP:</b> ${clientIp}\n` +
-        `⏰ <b>Timestamp:</b> ${new Date().toLocaleString()}\n\n` +
+        `Profile: <b>${profileName}</b>\n` +
+        `Domain: <code>${domain}</code>\n` +
+        `Attempted by: <b>${deviceDisplay}</b>\n` +
+        `Time: <b>${timeFormatted}</b>\n\n` +
         `⚠️ <i>Immediate review is recommended.</i>`;
 
       const sent = await this.sendTelegramAlert(alertMsg);
       await ServerDB.addAlert({
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
         user: userKey,
         domain,
         deviceName,
@@ -417,14 +480,14 @@ export class NextDNSService {
       await ServerDB.saveSeenDomains(seenDomains);
 
       const alertMsg = `🛡️ <b>New Domain Blocked</b>\n\n` +
-        `👤 <b>Profile:</b> ${profileName}\n` +
-        `🌐 <b>Domain:</b> <code>${domain}</code>\n` +
-        `📱 <b>Device:</b> ${deviceName}\n` +
-        `⏰ <b>Time:</b> ${new Date().toLocaleTimeString()}`;
+        `Profile: <b>${profileName}</b>\n` +
+        `Domain: <code>${domain}</code>\n` +
+        `Device: <b>${deviceDisplay}</b>\n` +
+        `Time: <b>${timeFormatted}</b>`;
 
       const sent = await this.sendTelegramAlert(alertMsg);
       await ServerDB.addAlert({
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
         user: userKey,
         domain,
         deviceName,
@@ -432,47 +495,303 @@ export class NextDNSService {
         status: sent ? 'sent' : 'failed',
         errorMessage: sent ? undefined : 'Failed to send Telegram payload'
       });
+    } else {
+      // 4. Blocked Domain Access Attempt alert (for repeated access attempts on already-blocked domains)
+      const cooldownKey = `${deviceName}:${domain}`;
+      const currentTime = Date.now();
+      if (!this.alertCooldowns[cooldownKey] || currentTime - this.alertCooldowns[cooldownKey] > 20000) {
+        this.alertCooldowns[cooldownKey] = currentTime;
+
+        const alertMsg = `⚠️ <b>Blocked Domain Access Attempt</b>\n\n` +
+          `Profile: <b>${profileName}</b>\n` +
+          `Domain: <code>${domain}</code>\n` +
+          `Attempted by: <b>${deviceDisplay}</b>\n` +
+          `Time: <b>${timeFormatted}</b>`;
+
+        const sent = await this.sendTelegramAlert(alertMsg);
+        await ServerDB.addAlert({
+          timestamp: now.toISOString(),
+          user: userKey,
+          domain,
+          deviceName,
+          type: 'watchlist',
+          status: sent ? 'sent' : 'failed',
+          errorMessage: sent ? undefined : 'Failed to send Telegram payload'
+        });
+      }
     }
+  }
+
+  // Generate per-device analytics breakdown purely from NextDNS API across all profiles
+  static async getDeviceAnalytics(): Promise<any[]> {
+    const now = Date.now();
+    if (this.deviceAnalyticsCache && (now - this.deviceAnalyticsCache.timestamp < this.CACHE_TTL_MS)) {
+      return this.deviceAnalyticsCache.data;
+    }
+
+    const settings = await ServerDB.getSettings();
+
+    if (settings.nextDnsApiKey) {
+      try {
+        const profiles = await this.getDynamicProfiles();
+        const deviceAnalytics: any[] = [];
+        const logs = await ServerDB.getLogs();
+
+        for (const profile of profiles) {
+          try {
+            // Fetch total devices list for profile
+            const res = await fetch(`https://api.nextdns.io/profiles/${profile.id}/analytics/devices?from=-7d&limit=100`, {
+              headers: { 'X-Api-Key': settings.nextDnsApiKey },
+            });
+
+            if (res.ok) {
+              const json = await res.json() as any;
+              const rawDevices = json.data || [];
+
+              for (const item of rawDevices) {
+                const rawName = (item.name || item.deviceName || item.model || '').trim();
+                const rawIp = (item.ip || item.clientIp || (typeof item.id === 'string' && item.id.includes('.') ? item.id : '')).trim();
+
+                let deviceName = '';
+                if (rawName && rawName !== 'undefined' && rawName !== 'null' && rawName.toLowerCase() !== 'unidentified devices' && rawName.toLowerCase() !== 'unidentified') {
+                  deviceName = rawName;
+                } else if (rawIp) {
+                  deviceName = rawIp;
+                } else {
+                  deviceName = 'Unidentified devices';
+                }
+
+                const clientIp = rawIp || (typeof item.id === 'string' ? item.id : 'N/A');
+                const devParam = item.id ? item.id : encodeURIComponent(deviceName);
+
+                const devLogs = logs.filter(l => 
+                  (l.profileName === profile.name || l.profileName?.toLowerCase() === profile.id.toLowerCase()) &&
+                  (
+                    l.deviceName?.toLowerCase() === deviceName.toLowerCase() ||
+                    l.clientIp === clientIp ||
+                    (clientIp !== 'N/A' && clientIp.includes(l.clientIp))
+                  )
+                );
+                const blockedLogs = devLogs.filter(l => l.status === 'blocked');
+
+                let apiStatusBlockedCount = 0;
+                let apiStatusTotalCount = 0;
+                let blockedDomainsList: any[] = [];
+
+                try {
+                  const [resStatus, devBlockedRes] = await Promise.all([
+                    fetch(`https://api.nextdns.io/profiles/${profile.id}/analytics/status?from=-7d&device=${devParam}`, {
+                      headers: { 'X-Api-Key': settings.nextDnsApiKey },
+                    }),
+                    fetch(`https://api.nextdns.io/profiles/${profile.id}/analytics/domains?from=-7d&status=blocked&device=${devParam}&limit=100`, {
+                      headers: { 'X-Api-Key': settings.nextDnsApiKey },
+                    })
+                  ]);
+
+                  if (resStatus.ok) {
+                    const jsonStatus = await resStatus.json() as any;
+                    const statusArray = Array.isArray(jsonStatus.data) ? jsonStatus.data : (Array.isArray(jsonStatus) ? jsonStatus : []);
+                    for (const sItem of statusArray) {
+                      const sKey = (sItem.id || sItem.status || sItem.name || '').toString().toLowerCase();
+                      const sCount = typeof sItem.queries === 'number' ? sItem.queries : (sItem.count || sItem.blocks || 0);
+                      apiStatusTotalCount += sCount;
+                      if (sKey === 'blocked' || sKey === 'denied' || sKey === 'blacklist' || sKey === 'block') {
+                        apiStatusBlockedCount += sCount;
+                      }
+                    }
+                  }
+
+                  if (devBlockedRes.ok) {
+                    const jsonDevDom = await devBlockedRes.json() as any;
+                    const rawDevDom = jsonDevDom.data || [];
+                    if (Array.isArray(rawDevDom) && rawDevDom.length > 0) {
+                      blockedDomainsList = rawDevDom.map((dItem: any) => ({
+                        domain: dItem.domain || dItem.name || 'unknown',
+                        blocks: typeof dItem.queries === 'number' ? dItem.queries : (dItem.count || dItem.blocks || 1),
+                        lastBlockedAt: new Date().toISOString()
+                      }));
+                    }
+                  }
+                } catch (e) {
+                  console.error(`Error fetching device details for device ${deviceName}:`, e);
+                }
+
+                if (blockedDomainsList.length === 0 && blockedLogs.length > 0) {
+                  const domainMap: { [dom: string]: { blocks: number; lastBlockedAt: string } } = {};
+                  for (const log of blockedLogs) {
+                    if (!domainMap[log.domain]) {
+                      domainMap[log.domain] = { blocks: 0, lastBlockedAt: log.timestamp };
+                    }
+                    domainMap[log.domain].blocks += 1;
+                    if (new Date(log.timestamp) > new Date(domainMap[log.domain].lastBlockedAt)) {
+                      domainMap[log.domain].lastBlockedAt = log.timestamp;
+                    }
+                  }
+                  blockedDomainsList = Object.keys(domainMap).map(dom => ({
+                    domain: dom,
+                    blocks: domainMap[dom].blocks,
+                    lastBlockedAt: domainMap[dom].lastBlockedAt
+                  })).sort((a, b) => b.blocks - a.blocks);
+                }
+
+                const sumDomainsBlocked = blockedDomainsList.reduce((acc: number, curr: any) => acc + (curr.blocks || 0), 0);
+
+                let blockedQueries = 0;
+                if (apiStatusBlockedCount > 0) {
+                  blockedQueries = apiStatusBlockedCount;
+                } else if (sumDomainsBlocked > 0) {
+                  blockedQueries = sumDomainsBlocked;
+                } else if (typeof item.blocks === 'number' && item.blocks > 0) {
+                  blockedQueries = item.blocks;
+                } else if (typeof item.blocked === 'number' && item.blocked > 0) {
+                  blockedQueries = item.blocked;
+                } else if (blockedLogs.length > 0) {
+                  blockedQueries = blockedLogs.length;
+                }
+
+                let totalQueries = typeof item.queries === 'number' ? item.queries : (item.count || 0);
+                if (apiStatusTotalCount > totalQueries && apiStatusTotalCount > 0) {
+                  totalQueries = apiStatusTotalCount;
+                }
+                if (blockedQueries > totalQueries) {
+                  totalQueries = blockedQueries;
+                }
+
+                const blockedPercentage = totalQueries > 0 
+                  ? parseFloat(((blockedQueries / totalQueries) * 100).toFixed(2)) 
+                  : 0;
+
+                const topDomainsList = blockedDomainsList.map(d => ({
+                  domain: d.domain,
+                  queries: d.blocks,
+                  blocks: d.blocks
+                }));
+
+                deviceAnalytics.push({
+                  deviceName,
+                  clientIp,
+                  profileName: profile.name,
+                  profileId: profile.id,
+                  totalQueries,
+                  blockedQueries,
+                  blockedPercentage,
+                  blockedDomains: blockedDomainsList,
+                  topDomains: topDomainsList,
+                  lastActive: devLogs[0]?.timestamp || new Date().toISOString()
+                });
+              }
+            }
+          } catch (e) {
+            console.error(`Error fetching device analytics for profile ${profile.id}:`, e);
+          }
+        }
+
+        if (deviceAnalytics.length > 0) {
+          this.deviceAnalyticsCache = { data: deviceAnalytics, timestamp: Date.now() };
+          return deviceAnalytics;
+        }
+      } catch (err) {
+        console.error('Error fetching NextDNS device analytics:', err);
+      }
+    }
+
+    if (this.deviceAnalyticsCache) {
+      return this.deviceAnalyticsCache.data;
+    }
+
+    // Fallback: If no API key or API returns no devices, check actual DB logs
+    const logs = await ServerDB.getLogs();
+    if (!logs || logs.length === 0) {
+      return [];
+    }
+
+    const deviceMap: {
+      [key: string]: {
+        deviceName: string;
+        clientIp: string;
+        profileName: string;
+        logs: any[];
+      }
+    } = {};
+
+    for (const log of logs) {
+      const devName = log.deviceName || log.clientIp || 'Unidentified devices';
+      const ip = log.clientIp || 'N/A';
+      const key = `${devName.toLowerCase()}:${ip}`;
+
+      if (!deviceMap[key]) {
+        deviceMap[key] = {
+          deviceName: devName,
+          clientIp: ip,
+          profileName: log.profileName || 'Default',
+          logs: []
+        };
+      }
+      deviceMap[key].logs.push(log);
+    }
+
+    const deviceAnalytics = [];
+
+    for (const key of Object.keys(deviceMap)) {
+      const item = deviceMap[key];
+      const devLogs = item.logs;
+      const blockedLogs = devLogs.filter(l => l.status === 'blocked');
+      
+      const domainMap: { [dom: string]: { blocks: number; lastBlockedAt: string } } = {};
+      for (const log of blockedLogs) {
+        if (!domainMap[log.domain]) {
+          domainMap[log.domain] = { blocks: 0, lastBlockedAt: log.timestamp };
+        }
+        domainMap[log.domain].blocks += 1;
+        if (new Date(log.timestamp) > new Date(domainMap[log.domain].lastBlockedAt)) {
+          domainMap[log.domain].lastBlockedAt = log.timestamp;
+        }
+      }
+
+      const blockedDomainsList = Object.keys(domainMap).map(dom => ({
+        domain: dom,
+        blocks: domainMap[dom].blocks,
+        lastBlockedAt: domainMap[dom].lastBlockedAt
+      })).sort((a, b) => b.blocks - a.blocks);
+
+      const totalQueries = devLogs.length;
+      const totalBlocksCount = blockedLogs.length;
+      const blockRatePct = totalQueries > 0 
+        ? parseFloat(((totalBlocksCount / totalQueries) * 100).toFixed(1)) 
+        : 0;
+
+      const topDomainsList = blockedDomainsList.map(d => ({
+        domain: d.domain,
+        queries: d.blocks,
+        blocks: d.blocks
+      }));
+
+      const lastActiveTime = devLogs[0]?.timestamp || new Date().toISOString();
+
+      deviceAnalytics.push({
+        deviceName: item.deviceName,
+        clientIp: item.clientIp,
+        profileName: item.profileName,
+        totalQueries,
+        blockedQueries: totalBlocksCount,
+        blockedPercentage: blockRatePct,
+        blockedDomains: blockedDomainsList,
+        topDomains: topDomainsList,
+        lastActive: lastActiveTime
+      });
+    }
+
+    return deviceAnalytics;
   }
 
   // Live monitor stream loop for a profile (SSE NextDNS API)
   static startLiveMonitor(profileId: string, profileName: string) {
     if (this.activeSSEListeners[profileId]) return;
 
-    // We keep a simple placeholder interval for background loop so we can simulate if API Key is missing.
-    // If API Key is configured, we will connect to NextDNS's log stream.
-    
     const monitorLoop = async () => {
       const settings = await ServerDB.getSettings();
       if (!settings.nextDnsApiKey) {
-        // Mock periodic generation of events every 30-60 seconds for active demonstration!
-        const interval = setInterval(async () => {
-          const rand = Math.random();
-          if (rand > 0.4) return; // 40% chance every check
-
-          // Pick random domain, device, status
-          const blocklists = await ServerDB.getBlocklists();
-          const watchlist = await ServerDB.getWatchlist();
-          const allBlocked = Array.from(new Set([...blocklists.general, ...watchlist.domains]));
-          
-          const domain = allBlocked[Math.floor(Math.random() * allBlocked.length)];
-          let devices = ['Guest-Laptop', 'Smart-TV', 'Home-IoT'];
-          if (profileId === '3e1c94') devices = ['Home-Router', 'Wifi-Extender', 'Smart-TV'];
-          else if (profileId === 'd76372') devices = ['MINE-Macbook', 'MINE-iPhone', 'MINE-iPad'];
-          else if (profileId === 'c9e833') devices = ['AMMU-Phone', 'AMMU-Tablet'];
-          else if (profileId === '92b815') devices = ['ABBU-Phone', 'ABBU-Laptop'];
-          else if (profileId === '38db7e') devices = ['Guest-Device', 'IoT-Thermostat'];
-          const device = devices[Math.floor(Math.random() * devices.length)];
-          const clientIp = `192.168.1.${Math.floor(Math.random() * 50) + 10}`;
-
-          await this.processBlockEvent(profileId, profileName, domain, device, clientIp);
-        }, 15000); // Check every 15 seconds
-
-        this.activeSSEListeners[profileId] = {
-          type: 'mock',
-          handle: interval
-        };
-        console.log(`Started SIMULATED live background SSE log monitor for ${profileName}`);
+        console.log(`[Live Monitor] Waiting for NextDNS API Key to connect stream for profile ${profileName}`);
         return;
       }
 
@@ -511,9 +830,18 @@ export class NextDNSService {
                   const dataStr = line.slice(6).trim();
                   if (!dataStr) continue;
                   const log = JSON.parse(dataStr);
-                  if (log.status === 'blocked') {
-                    const domain = log.domain || '';
-                    const device = log.device?.name || 'Unknown Device';
+                  const domain = log.domain || log.name || '';
+                  if (!domain) continue;
+
+                  const watchlist = await ServerDB.getWatchlist();
+                  const isWatchlisted = watchlist.domains.some(w => {
+                    const wLower = w.toLowerCase().trim();
+                    const dLower = domain.toLowerCase().trim();
+                    return dLower === wLower || dLower.endsWith('.' + wLower);
+                  });
+
+                  if (isWatchlisted || log.status === 'blocked') {
+                    const device = log.device?.name || log.deviceName || 'Unknown Device';
                     const clientIp = log.clientIp || '0.0.0.0';
                     await this.processBlockEvent(profileId, profileName, domain, device, clientIp);
                   }
@@ -548,9 +876,18 @@ export class NextDNSService {
                       const dataStr = line.slice(6).trim();
                       if (!dataStr) continue;
                       const log = JSON.parse(dataStr);
-                      if (log.status === 'blocked') {
-                        const domain = log.domain || '';
-                        const device = log.device?.name || 'Unknown Device';
+                      const domain = log.domain || log.name || '';
+                      if (!domain) continue;
+
+                      const watchlist = await ServerDB.getWatchlist();
+                      const isWatchlisted = watchlist.domains.some(w => {
+                        const wLower = w.toLowerCase().trim();
+                        const dLower = domain.toLowerCase().trim();
+                        return dLower === wLower || dLower.endsWith('.' + wLower);
+                      });
+
+                      if (isWatchlisted || log.status === 'blocked') {
+                        const device = log.device?.name || log.deviceName || 'Unknown Device';
                         const clientIp = log.clientIp || '0.0.0.0';
                         await this.processBlockEvent(profileId, profileName, domain, device, clientIp);
                       }
@@ -570,10 +907,14 @@ export class NextDNSService {
           })();
         }
 
-      } catch (err) {
-        console.error(`Error connecting real SSE stream for ${profileName}:`, err);
-        // Retry in 30 seconds
-        setTimeout(() => this.startLiveMonitor(profileId, profileName), 30000);
+      } catch (err: any) {
+        if (err?.message?.includes('429')) {
+          console.warn(`[Live Monitor] Rate limit 429 on real SSE stream for ${profileName}. Will retry connection in 60s.`);
+          setTimeout(() => this.startLiveMonitor(profileId, profileName), 60000);
+        } else {
+          console.error(`Error connecting real SSE stream for ${profileName}:`, err);
+          setTimeout(() => this.startLiveMonitor(profileId, profileName), 30000);
+        }
       }
     };
 
@@ -596,18 +937,90 @@ export class NextDNSService {
     console.log(`Stopped log monitor stream for profile ${profileId}`);
   }
 
+  private static processedLogKeys = new Set<string>();
+  private static pollerIntervalHandle: any = null;
+
+  static async pollLatestLogsForAllProfiles() {
+    const settings = await ServerDB.getSettings();
+    if (!settings.nextDnsApiKey) return;
+
+    try {
+      const profiles = await ServerDB.getProfiles();
+      const watchlist = await ServerDB.getWatchlist();
+
+      for (const profile of profiles) {
+        try {
+          const res = await fetch(`https://api.nextdns.io/profiles/${profile.id}/logs?limit=40`, {
+            headers: { 'X-Api-Key': settings.nextDnsApiKey }
+          });
+
+          if (!res.ok) continue;
+
+          const json = await res.json() as any;
+          const logsArr = json.data || (Array.isArray(json) ? json : []);
+
+          for (const log of logsArr) {
+            const domain = log.domain || log.name || '';
+            if (!domain) continue;
+
+            const logTime = log.timestamp || log.time || new Date().toISOString();
+            const device = log.device?.name || log.deviceName || log.device?.model || 'Unknown Device';
+            const clientIp = log.clientIp || log.ip || '0.0.0.0';
+            const status = log.status || 'default';
+
+            const logKey = `${profile.id}:${domain}:${device}:${logTime}`;
+            if (this.processedLogKeys.has(logKey)) continue;
+
+            if (this.processedLogKeys.size > 2000) {
+              this.processedLogKeys.clear();
+            }
+            this.processedLogKeys.add(logKey);
+
+            const isWatchlisted = watchlist.domains.some(w => {
+              const wLower = w.toLowerCase().trim();
+              const dLower = domain.toLowerCase().trim();
+              return dLower === wLower || dLower.endsWith('.' + wLower);
+            });
+
+            if (isWatchlisted || status === 'blocked') {
+              await this.processBlockEvent(profile.id, profile.name, domain, device, clientIp);
+            }
+          }
+        } catch (err) {
+          console.error(`Error polling logs for profile ${profile.name}:`, err);
+        }
+      }
+    } catch (e) {
+      console.error('Error in tight log poller:', e);
+    }
+  }
+
   static stopAllMonitors() {
     for (const pid of Object.keys(this.activeSSEListeners)) {
       this.stopLiveMonitor(pid);
+    }
+    if (this.pollerIntervalHandle) {
+      clearInterval(this.pollerIntervalHandle);
+      this.pollerIntervalHandle = null;
     }
   }
 
   static async startAllMonitors() {
     try {
       const profiles = await ServerDB.getProfiles();
-      for (const profile of profiles) {
-        this.startLiveMonitor(profile.id, profile.name);
+      profiles.forEach((profile, idx) => {
+        setTimeout(() => {
+          this.startLiveMonitor(profile.id, profile.name);
+        }, idx * 2000);
+      });
+
+      // Start tight log polling loop (every 20s) as backup to SSE stream
+      if (this.pollerIntervalHandle) {
+        clearInterval(this.pollerIntervalHandle);
       }
+      this.pollerIntervalHandle = setInterval(() => {
+        this.pollLatestLogsForAllProfiles().catch(e => console.error('Poller error:', e));
+      }, 20000);
     } catch (e) {
       console.error('Failed to start all live monitors:', e);
     }

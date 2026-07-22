@@ -37,8 +37,8 @@ async function startServer() {
 
       for (const profile of profiles) {
         const topDomains = await NextDNSService.fetchTopDomains(profile.id);
-        const totalQueries = profile.queriesLast7Days || 120;
-        const totalBlocks = profile.blocksLast7Days || 15;
+        const totalQueries = profile.queriesLast7Days;
+        const totalBlocks = profile.blocksLast7Days;
 
         analytics.push({
           username: profile.name,
@@ -47,12 +47,22 @@ async function startServer() {
           summary: {
             totalQueries,
             totalBlocks,
-            blockedPercentage: parseFloat(((totalBlocks / totalQueries) * 100).toFixed(1))
+            blockedPercentage: totalQueries > 0 ? parseFloat(((totalBlocks / totalQueries) * 100).toFixed(1)) : 0
           }
         });
       }
 
       res.json({ success: true, analytics });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // Get per-device analytics
+  app.get('/api/analytics/devices', async (req, res) => {
+    try {
+      const devices = await NextDNSService.getDeviceAnalytics();
+      res.json({ success: true, devices });
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message });
     }
@@ -78,7 +88,7 @@ async function startServer() {
     }
   });
 
-  // Save full blocklist configuration (general + perUser maps)
+  // Save full blocklist configuration (general + perUser maps) & push to NextDNS API
   app.post('/api/blocklists', async (req, res) => {
     try {
       const { blocklists } = req.body;
@@ -87,7 +97,18 @@ async function startServer() {
       }
 
       await ServerDB.saveBlocklists(blocklists);
-      res.json({ success: true, message: 'Blocklists saved. Trigger synchronization to push update!' });
+      const syncRes = await NextDNSService.syncAllProfiles();
+      res.json({ success: true, message: 'Blocklists saved and synchronized to NextDNS!', sync: syncRes });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // Pull denylists from NextDNS API to sync local state
+  app.post('/api/blocklists/pull', async (req, res) => {
+    try {
+      const result = await NextDNSService.pullDenylistsFromNextDNS();
+      res.json(result);
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message });
     }
@@ -103,6 +124,46 @@ async function startServer() {
 
       await ServerDB.saveWatchlist(watchlist);
       res.json({ success: true, message: 'Watchlist domains updated successfully' });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // Dispatch test Telegram alert for Watchlist domain
+  app.post('/api/watchlist/test-alert', async (req, res) => {
+    try {
+      const watchlist = await ServerDB.getWatchlist();
+      const targetDomain = watchlist.domains[0] || 'freefiremobile.com';
+      const profiles = await ServerDB.getProfiles();
+      const testProfile = profiles[0]?.name || 'MINE';
+
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const now = new Date();
+      const timeFormatted = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+      const alertMsg = `🚨 <b>[TEST] Watchlist Access Violation Triggered!</b>\n\n` +
+        `Profile: <b>${testProfile}</b>\n` +
+        `Domain: <code>${targetDomain}</code>\n` +
+        `Attempted by: <b>Test Mobile Device (192.168.1.50)</b>\n` +
+        `Time: <b>${timeFormatted}</b>\n\n` +
+        `⚠️ <i>This is a manual test dispatch from NextDNS Guard.</i>`;
+
+      const sent = await NextDNSService.sendTelegramAlert(alertMsg);
+      await ServerDB.addAlert({
+        timestamp: now.toISOString(),
+        user: 'mine',
+        domain: targetDomain,
+        deviceName: 'Test Mobile Device',
+        type: 'watchlist',
+        status: sent ? 'sent' : 'failed',
+        errorMessage: sent ? undefined : 'Failed to dispatch Telegram payload'
+      });
+
+      if (sent) {
+        res.json({ success: true, message: `Test Telegram alert sent for ${targetDomain}!` });
+      } else {
+        res.status(500).json({ success: false, message: 'Telegram dispatch failed. Check Bot Token and Chat ID in Settings.' });
+      }
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message });
     }
