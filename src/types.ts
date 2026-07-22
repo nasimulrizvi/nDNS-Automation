@@ -1,0 +1,99 @@
+/**
+ * NextDNS Multi-User Automation Schema & Types
+ */
+
+export interface NextDNSProfile {
+  id: string;
+  name: string;
+  deviceCount: number;
+  activeRulesCount: number;
+  queriesLast7Days: number;
+  blocksLast7Days: number;
+  status: 'active' | 'inactive';
+}
+
+export interface AppSettings {
+  nextDnsApiKey: string;
+  telegramBotToken: string;
+  telegramChatId: string;
+  emailAlertsEnabled: boolean;
+  emailSmtpConfig?: {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    from: string;
+  };
+}
+
+export interface Blocklists {
+  general: string[];
+  perUser: {
+    [username: string]: string[];
+  };
+}
+
+export interface Watchlist {
+  domains: string[];
+}
+
+export interface ThreatFeed {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  lastChecked?: string;
+  domainsAdded?: number;
+  status: 'success' | 'failed' | 'never';
+}
+
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  domain: string;
+  rootDomain: string;
+  deviceName: string;
+  clientIp: string;
+  status: 'blocked' | 'allowed';
+  matchedRule?: string;
+  profileName: string;
+}
+
+export interface AlertLogEntry {
+  id: string;
+  timestamp: string;
+  user: string;
+  domain: string;
+  deviceName: string;
+  type: 'watchlist' | 'new_block';
+  status: 'sent' | 'failed';
+  errorMessage?: string;
+}
+
+export interface AnalyticsDomain {
+  domain: string;
+  queries: number;
+  blocks: number;
+}
+
+export interface UserAnalytics {
+  username: string;
+  profileId: string;
+  topDomains: AnalyticsDomain[];
+  summary: {
+    totalQueries: number;
+    totalBlocks: number;
+    blockedPercentage: number;
+  };
+}
+
+export interface SystemState {
+  settings: AppSettings;
+  profiles: NextDNSProfile[];
+  blocklists: Blocklists;
+  watchlist: Watchlist;
+  threatFeeds: ThreatFeed[];
+  logs: LogEntry[];
+  alerts: AlertLogEntry[];
+  seenDomains: { [key: string]: string }; // Map of "user:domain" -> "YYYY-MM-DD"
+}
