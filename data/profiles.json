@@ -1,0 +1,47 @@
+[
+  {
+    "id": "3e1c94",
+    "name": "Router",
+    "deviceCount": 7,
+    "activeRulesCount": 16,
+    "queriesLast7Days": 150558,
+    "blocksLast7Days": 48708,
+    "status": "active"
+  },
+  {
+    "id": "d76372",
+    "name": "MINE",
+    "deviceCount": 0,
+    "activeRulesCount": 18,
+    "queriesLast7Days": 0,
+    "blocksLast7Days": 0,
+    "status": "active"
+  },
+  {
+    "id": "c9e833",
+    "name": "AMMU",
+    "deviceCount": 0,
+    "activeRulesCount": 18,
+    "queriesLast7Days": 0,
+    "blocksLast7Days": 0,
+    "status": "active"
+  },
+  {
+    "id": "92b815",
+    "name": "ABBU",
+    "deviceCount": 0,
+    "activeRulesCount": 18,
+    "queriesLast7Days": 0,
+    "blocksLast7Days": 0,
+    "status": "active"
+  },
+  {
+    "id": "38db7e",
+    "name": "Others",
+    "deviceCount": 1,
+    "activeRulesCount": 18,
+    "queriesLast7Days": 2947,
+    "blocksLast7Days": 253,
+    "status": "active"
+  }
+]

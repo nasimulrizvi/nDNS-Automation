@@ -410,8 +410,7 @@ export class NextDNSService {
     clientIp: string
   ) {
     const watchlist = await ServerDB.getWatchlist();
-    const seenDomains = await ServerDB.getSeenDomains();
-    const todayStr = new Date().toISOString().split('T')[0];
+    const blocklists = await ServerDB.getBlocklists();
 
     // Formatted timestamp: YYYY-MM-DD HH:mm:ss
     const pad = (n: number) => n.toString().padStart(2, '0');
@@ -424,13 +423,6 @@ export class NextDNSService {
       deviceDisplay = `${deviceName} (${clientIp})`;
     }
 
-    // Check if domain matches any watchlisted target (root match support)
-    const isWatchlisted = watchlist.domains.some(w => {
-      const wLower = w.toLowerCase().trim();
-      const dLower = domain.toLowerCase().trim();
-      return dLower === wLower || dLower.endsWith('.' + wLower);
-    });
-
     let userKey = 'others';
     const nameLower = profileName.toLowerCase();
     if (nameLower.includes('router')) userKey = 'router';
@@ -439,7 +431,33 @@ export class NextDNSService {
     else if (nameLower.includes('abbu')) userKey = 'abbu';
     else if (nameLower.includes('others')) userKey = 'others';
 
-    // 1. Log block in our history database
+    // 1. Check if domain matches any watchlisted target (root/subdomain match support)
+    const isWatchlisted = watchlist.domains.some(w => {
+      const wLower = w.toLowerCase().trim();
+      const dLower = domain.toLowerCase().trim();
+      return dLower === wLower || dLower.endsWith('.' + wLower);
+    });
+
+    // 2. Check if domain matches any active Denylist entry (general or profile-specific)
+    const activeDenylist = [
+      ...(blocklists.general || []),
+      ...(blocklists.perUser[userKey] || [])
+    ];
+    const isDenylisted = activeDenylist.some(b => {
+      const bLower = b.toLowerCase().trim();
+      const dLower = domain.toLowerCase().trim();
+      return dLower === bLower || dLower.endsWith('.' + bLower);
+    });
+
+    // 3. Always record block log in database history for analytics
+    const matchedRuleName = (isWatchlisted && isDenylisted)
+      ? 'Denylist & Watchlist Match'
+      : isWatchlisted 
+        ? 'Watchlist Match & Block' 
+        : isDenylisted 
+          ? 'Domain Denylist Match' 
+          : 'Standard Filtering Block';
+
     await ServerDB.addLog({
       timestamp: now.toISOString(),
       domain,
@@ -447,78 +465,66 @@ export class NextDNSService {
       deviceName,
       clientIp,
       status: 'blocked',
-      matchedRule: isWatchlisted ? 'Watchlist Match & Block' : 'Automation Denylist Match',
+      matchedRule: matchedRuleName,
       profileName
     });
 
-    // 2. Watchlist alert — instant send
-    if (isWatchlisted) {
-      const alertMsg = `🚨 <b>Watchlist Access Violation Triggered!</b>\n\n` +
-        `Profile: <b>${profileName}</b>\n` +
-        `Domain: <code>${domain}</code>\n` +
-        `Attempted by: <b>${deviceDisplay}</b>\n` +
-        `Time: <b>${timeFormatted}</b>\n\n` +
-        `⚠️ <i>Immediate review is recommended.</i>`;
-
-      const sent = await this.sendTelegramAlert(alertMsg);
-      await ServerDB.addAlert({
-        timestamp: now.toISOString(),
-        user: userKey,
-        domain,
-        deviceName,
-        type: 'watchlist',
-        status: sent ? 'sent' : 'failed',
-        errorMessage: sent ? undefined : 'Failed to send Telegram payload'
-      });
+    // 4. Strict Scoping: If domain is NOT in Watchlist AND NOT in Denylist -> DO NOT SEND TELEGRAM ALERT
+    if (!isWatchlisted && !isDenylisted) {
       return;
     }
 
-    // 3. New domain block alert — deduplicated per user-domain combination per day
-    const seenKey = `${userKey}:${domain}`;
-    if (seenDomains[seenKey] !== todayStr) {
-      seenDomains[seenKey] = todayStr;
-      await ServerDB.saveSeenDomains(seenDomains);
+    let alertMsg = '';
+    let alertType: 'watchlist' | 'denylist' | 'new_block' = 'watchlist';
 
-      const alertMsg = `🛡️ <b>New Domain Blocked</b>\n\n` +
-        `Profile: <b>${profileName}</b>\n` +
-        `Domain: <code>${domain}</code>\n` +
-        `Device: <b>${deviceDisplay}</b>\n` +
-        `Time: <b>${timeFormatted}</b>`;
+    if (isWatchlisted && isDenylisted) {
+      // Scenario 3: Matches BOTH Denylist/Blocklists AND Watchlist (single combined alert)
+      alertType = 'watchlist';
+      alertMsg = `🛑 <b>Explicit Denylist Access Attempt</b>\n\n` +
+        `• <b>Matched List:</b> Domain Denylist & Watchlist\n` +
+        `• <b>Profile:</b> <b>${profileName}</b>\n` +
+        `• <b>Domain:</b> <code>${domain}</code>\n` +
+        `• <b>Attempted by:</b> <b>${deviceDisplay}</b>\n` +
+        `• <b>Time:</b> <b>${timeFormatted}</b>\n\n` +
+        `⚠️ <i>Domain is explicitly configured on the profile denylist & Watchlist.</i>`;
+    } else if (isWatchlisted) {
+      // Scenario 2: Watchlist match ONLY
+      alertType = 'watchlist';
+      alertMsg = `🛡️ <b>Watchlist Domain Access Attempt</b>\n\n` +
+        `• <b>Profile:</b> <b>${profileName}</b>\n` +
+        `• <b>Domain:</b> <code>${domain}</code>\n` +
+        `• <b>Device:</b> <b>${deviceDisplay}</b>\n` +
+        `• <b>Time:</b> <b>${timeFormatted}</b>\n\n` +
+        `🛑 <i>Domain matches the Watchlist.</i>`;
+    } else if (isDenylisted) {
+      // Scenario 1: Denylist match ONLY (5-min cooldown per device-domain pair to prevent notification flooding)
+      alertType = 'denylist';
+      const cooldownKey = `denylist:${userKey}:${deviceName}:${domain}`;
+      const currentTime = Date.now();
+      if (this.alertCooldowns[cooldownKey] && currentTime - this.alertCooldowns[cooldownKey] <= 300000) {
+        return;
+      }
+      this.alertCooldowns[cooldownKey] = currentTime;
 
+      alertMsg = `🛡️ <b>Denylist Domain Access Attempt</b>\n\n` +
+        `• <b>Matched List:</b> Domain Blocklists\n` +
+        `• <b>Profile:</b> <b>${profileName}</b>\n` +
+        `• <b>Domain:</b> <code>${domain}</code>\n` +
+        `• <b>Attempted by:</b> <b>${deviceDisplay}</b>\n` +
+        `• <b>Time:</b> <b>${timeFormatted}</b>`;
+    }
+
+    if (alertMsg) {
       const sent = await this.sendTelegramAlert(alertMsg);
       await ServerDB.addAlert({
         timestamp: now.toISOString(),
         user: userKey,
         domain,
         deviceName,
-        type: 'new_block',
+        type: alertType,
         status: sent ? 'sent' : 'failed',
         errorMessage: sent ? undefined : 'Failed to send Telegram payload'
       });
-    } else {
-      // 4. Blocked Domain Access Attempt alert (for repeated access attempts on already-blocked domains)
-      const cooldownKey = `${deviceName}:${domain}`;
-      const currentTime = Date.now();
-      if (!this.alertCooldowns[cooldownKey] || currentTime - this.alertCooldowns[cooldownKey] > 20000) {
-        this.alertCooldowns[cooldownKey] = currentTime;
-
-        const alertMsg = `⚠️ <b>Blocked Domain Access Attempt</b>\n\n` +
-          `Profile: <b>${profileName}</b>\n` +
-          `Domain: <code>${domain}</code>\n` +
-          `Attempted by: <b>${deviceDisplay}</b>\n` +
-          `Time: <b>${timeFormatted}</b>`;
-
-        const sent = await this.sendTelegramAlert(alertMsg);
-        await ServerDB.addAlert({
-          timestamp: now.toISOString(),
-          user: userKey,
-          domain,
-          deviceName,
-          type: 'watchlist',
-          status: sent ? 'sent' : 'failed',
-          errorMessage: sent ? undefined : 'Failed to send Telegram payload'
-        });
-      }
     }
   }
 

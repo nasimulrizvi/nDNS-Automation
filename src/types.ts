@@ -65,7 +65,7 @@ export interface AlertLogEntry {
   user: string;
   domain: string;
   deviceName: string;
-  type: 'watchlist' | 'new_block';
+  type: 'watchlist' | 'new_block' | 'denylist';
   status: 'sent' | 'failed';
   errorMessage?: string;
 }
