@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { UserAnalytics, DeviceAnalytics } from '../types';
 import { ClientAPI } from '../api';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, Legend } from 'recharts';
-import { BarChart3, PieChartIcon, ArrowRightLeft, Users, ShieldAlert, RefreshCw, Smartphone, Layers, Laptop, User, Wifi, Shield } from 'lucide-react';
+import { BarChart3, PieChartIcon, ArrowRightLeft, Users, ShieldAlert, Smartphone, Layers, Laptop, User, Wifi, Shield } from 'lucide-react';
+import Skeleton from './Skeleton';
 
 export default function AnalyticsView() {
   const [analytics, setAnalytics] = useState<UserAnalytics[]>([]);
@@ -10,8 +11,16 @@ export default function AnalyticsView() {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'profile' | 'device'>('profile');
   const [selectedUser, setSelectedUser] = useState<string>('');
-  const [selectedDeviceName, setSelectedDeviceName] = useState<string>('');
+  const [selectedDeviceKey, setSelectedDeviceKey] = useState<string>('');
   const [error, setError] = useState('');
+
+  const getDeviceKey = (dev: DeviceAnalytics, index: number): string => {
+    if (dev.id && dev.id !== '__UNIDENTIFIED__' && dev.id !== 'unidentified') {
+      return dev.id;
+    }
+    const ip = (dev.clientIp && dev.clientIp !== 'N/A' && dev.clientIp !== '0.0.0.0') ? dev.clientIp : 'noip';
+    return `${dev.deviceName}__${ip}__${dev.profileName || ''}__${index}`;
+  };
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -30,8 +39,12 @@ export default function AnalyticsView() {
       if (safeP.length > 0 && !selectedUser) {
         setSelectedUser(safeP[0].username);
       }
-      if (safeD.length > 0 && !selectedDeviceName) {
-        setSelectedDeviceName(safeD[0].deviceName);
+      if (safeD.length > 0) {
+        setSelectedDeviceKey(prevKey => {
+          const exists = safeD.some((d, idx) => getDeviceKey(d, idx) === prevKey);
+          if (prevKey && exists) return prevKey;
+          return getDeviceKey(safeD[0], 0);
+        });
       }
     } catch (err: any) {
       console.error('Error fetching analytics:', err);
@@ -46,7 +59,7 @@ export default function AnalyticsView() {
   }, []);
 
   const activeAnalytics = analytics.find(a => a.username === selectedUser) || analytics[0];
-  const activeDevice = deviceAnalytics.find(d => d.deviceName === selectedDeviceName) || deviceAnalytics[0];
+  const activeDevice = deviceAnalytics.find((d, idx) => getDeviceKey(d, idx) === selectedDeviceKey) || deviceAnalytics[0];
 
   // Profile chart data
   const totalQueries = activeAnalytics?.summary?.totalQueries ?? 0;
@@ -100,7 +113,7 @@ export default function AnalyticsView() {
           <p className="text-xs text-slate-400 mt-1">Cross-profile and device-specific DNS traffic distribution and threat analytics.</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap items-center justify-end gap-2 w-full md:w-auto">
           {/* Toggle Profile vs Device Analytics */}
           <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800">
             <button
@@ -146,36 +159,32 @@ export default function AnalyticsView() {
             </div>
           ) : (
             <div className="flex bg-slate-900/60 p-1 rounded-xl border border-slate-800 overflow-x-auto max-w-full">
-              {deviceAnalytics.map(dev => (
-                <button
-                  key={dev.deviceName}
-                  onClick={() => setSelectedDeviceName(dev.deviceName)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${
-                    selectedDeviceName === dev.deviceName
-                      ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/30'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {dev.deviceName}
-                </button>
-              ))}
+              {deviceAnalytics.map((dev, idx) => {
+                const devKey = getDeviceKey(dev, idx);
+                const isSelected = selectedDeviceKey === devKey;
+                return (
+                  <button
+                    key={devKey}
+                    onClick={() => setSelectedDeviceKey(devKey)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${
+                      isSelected
+                        ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/30'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {dev.deviceName}
+                  </button>
+                );
+              })}
             </div>
           )}
-
-          <button
-            onClick={fetchAnalytics}
-            className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-slate-200 rounded-xl transition shrink-0"
-            title="Refresh analytics data"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          </button>
         </div>
       </div>
 
       {loading ? (
-        <div className="py-20 text-center text-slate-500 space-y-2">
-          <RefreshCw className="animate-spin text-blue-500 mx-auto" size={24} />
-          <p className="text-xs">Loading DNS analytical reports...</p>
+        <div className="space-y-6">
+          <Skeleton variant="stat" count={3} />
+          <Skeleton variant="chart" count={2} />
         </div>
       ) : error ? (
         <div className="bg-red-950/20 border border-red-500/20 p-8 text-center rounded-xl text-red-400 space-y-3">

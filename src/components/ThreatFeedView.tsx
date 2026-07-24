@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { ThreatFeed } from '../types';
+import { formatDateTimeUtcPlus6 } from '../date-utils';
 import { Shield, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle, ExternalLink, Activity, AlertOctagon } from 'lucide-react';
 import { motion } from 'motion/react';
+import Skeleton from './Skeleton';
 
 interface ThreatFeedViewProps {
   feeds?: ThreatFeed[];
   onIngest?: () => Promise<{ addedCount: number; report: string }>;
   onSaveFeeds?: (newFeeds: ThreatFeed[]) => Promise<void>;
   ingesting?: boolean;
+  loading?: boolean;
 }
 
-export default function ThreatFeedView({ feeds = [], onIngest, onSaveFeeds, ingesting = false }: ThreatFeedViewProps) {
+export default function ThreatFeedView({ feeds = [], onIngest, onSaveFeeds, ingesting = false, loading = false }: ThreatFeedViewProps) {
   const [report, setReport] = useState<string>('');
   const [addedCount, setAddedCount] = useState<number | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -57,8 +60,7 @@ export default function ThreatFeedView({ feeds = [], onIngest, onSaveFeeds, inge
   const formatLastChecked = (dateStr?: string) => {
     if (!dateStr) return null;
     try {
-      const d = new Date(dateStr);
-      return isNaN(d.getTime()) ? null : d.toLocaleString();
+      return formatDateTimeUtcPlus6(dateStr);
     } catch {
       return null;
     }
@@ -118,7 +120,9 @@ export default function ThreatFeedView({ feeds = [], onIngest, onSaveFeeds, inge
           </div>
 
           <div className="space-y-3">
-            {feedList.length === 0 ? (
+            {loading || (ingesting && feedList.length === 0) ? (
+              <Skeleton variant="card" count={3} />
+            ) : feedList.length === 0 ? (
               <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs">
                 No threat feeds configured.
               </div>
@@ -133,17 +137,23 @@ export default function ThreatFeedView({ feeds = [], onIngest, onSaveFeeds, inge
                     className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row justify-between sm:items-center gap-4 relative overflow-hidden"
                   >
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="font-bold text-white text-sm">{feed.name || 'Threat Feed'}</h4>
+                        {feed.isPrimaryNative && (
+                          <span className="text-[10px] bg-purple-500/15 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
+                            <Shield size={10} className="text-purple-400" />
+                            Primary Source (NextDNS Native)
+                          </span>
+                        )}
                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
                           isEnabled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-400'
                         }`}>
                           {isEnabled ? 'Active Monitoring' : 'Disabled'}
                         </span>
                       </div>
-                      <p className="text-[11px] font-mono text-slate-500 flex items-center gap-1 truncate max-w-sm sm:max-w-md">
+                      <p className="text-[11px] font-mono text-slate-400 flex items-center gap-1 truncate max-w-sm sm:max-w-md">
                         <ExternalLink size={10} />
-                        {feed.url || 'No URL specified'}
+                        {feed.isPrimaryNative ? 'NextDNS Native Threat Intelligence API' : feed.url || 'No URL specified'}
                       </p>
                       
                       {formattedDate && (

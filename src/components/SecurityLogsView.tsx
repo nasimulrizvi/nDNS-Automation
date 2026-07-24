@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { LogEntry, AlertLogEntry } from '../types';
+import { formatTimeUtcPlus6, formatDateTimeUtcPlus6 } from '../date-utils';
 import { Terminal, ShieldAlert, ShieldCheck, AlertOctagon, Trash2, Clock, Smartphone, RefreshCw, Send } from 'lucide-react';
 import { motion } from 'motion/react';
+import Skeleton from './Skeleton';
 
 interface SecurityLogsViewProps {
   logs: LogEntry[];
@@ -9,9 +11,10 @@ interface SecurityLogsViewProps {
   onClearLogs: () => Promise<void>;
   onRefresh: () => Promise<void>;
   refreshing: boolean;
+  loading?: boolean;
 }
 
-export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh, refreshing }: SecurityLogsViewProps) {
+export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh, refreshing, loading = false }: SecurityLogsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'dns' | 'dispatch'>('dns');
 
   return (
@@ -78,7 +81,9 @@ export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh,
           </div>
 
           <div className="bg-slate-950/80 border border-slate-900 rounded-xl overflow-hidden shadow-inner">
-            {logs.length === 0 ? (
+            {loading ? (
+              <Skeleton variant="table-row" count={8} />
+            ) : logs.length === 0 ? (
               <div className="p-12 text-center text-slate-500 space-y-1">
                 <Terminal className="mx-auto text-slate-700" size={32} />
                 <p className="text-sm font-semibold">No active logs yet</p>
@@ -157,7 +162,7 @@ export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh,
 
                         <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
                           <Clock size={10} />
-                          {new Date(log.timestamp).toLocaleTimeString()}
+                          {formatTimeUtcPlus6(log.timestamp)}
                         </span>
                       </div>
                     </motion.div>
@@ -184,7 +189,9 @@ export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh,
           </div>
 
           <div className="bg-slate-950/80 border border-slate-900 rounded-xl overflow-hidden">
-            {alerts.length === 0 ? (
+            {loading ? (
+              <Skeleton variant="table-row" count={5} />
+            ) : alerts.length === 0 ? (
               <div className="p-12 text-center text-slate-500 space-y-1">
                 <Send className="mx-auto text-slate-700" size={32} />
                 <p className="text-sm font-semibold">No alerts dispatched yet</p>
@@ -209,7 +216,7 @@ export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh,
                         <span>•</span>
                         <span>Recipient: {alert.user}</span>
                         <span>•</span>
-                        <span>Time: {new Date(alert.timestamp).toLocaleString()}</span>
+                        <span>Time: {formatDateTimeUtcPlus6(alert.timestamp)}</span>
                       </div>
                     </div>
 

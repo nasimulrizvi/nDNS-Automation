@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ClientAPI } from './api';
 import { SystemState, Blocklists, Watchlist, ThreatFeed, AppSettings } from './types';
+import { formatTimeUtcPlus6 } from './date-utils';
 import DashboardView from './components/DashboardView';
 import BlocklistConfigView from './components/BlocklistConfigView';
 import WatchlistView from './components/WatchlistView';
@@ -33,6 +34,14 @@ export default function App() {
   const [ingesting, setIngesting] = useState(false);
   const [refreshingLogs, setRefreshingLogs] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [clockTimeUtc6, setClockTimeUtc6] = useState<string>(() => formatTimeUtcPlus6(new Date()));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setClockTimeUtc6(formatTimeUtcPlus6(new Date()));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const LOCAL_STORAGE_SETTINGS_KEY = 'nextdns_auto_credentials_v1';
 
@@ -221,17 +230,17 @@ export default function App() {
     }
   };
 
-  if (loading || !state) {
-    return (
-      <div className="min-h-screen bg-[#0b0f19] flex flex-col justify-center items-center text-slate-400 space-y-4 font-sans">
-        <RefreshCw className="animate-spin text-blue-500" size={36} />
-        <div className="text-center space-y-1">
-          <h3 className="font-bold text-white text-base">NextDNS Multi-User Automation</h3>
-          <p className="text-xs text-slate-500">Initializing database states & spawning log monitors...</p>
-        </div>
-      </div>
-    );
-  }
+  const currentState: SystemState = state || {
+    profiles: [],
+    blocklists: { general: [], perUser: { router: [], mine: [], ammu: [], abbu: [], others: [] } },
+    watchlist: { domains: [] },
+    threatFeeds: [],
+    settings: { telegramBotToken: '', telegramChatId: '', nextDnsApiKey: '', autoSyncIntervalMinutes: 30, emailAlertsEnabled: false },
+    logs: [],
+    alerts: []
+  };
+
+  const isInitialLoading = loading || !state;
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-slate-100 flex flex-col md:flex-row font-sans relative overflow-x-hidden">
@@ -264,7 +273,7 @@ export default function App() {
               <ShieldCheck size={20} />
             </div>
             <div>
-              <h1 className="font-extrabold text-sm tracking-tight text-white leading-none">NextDNS Auto</h1>
+              <h1 className="font-extrabold text-sm tracking-tight text-white leading-none">nDNS Automations</h1>
               <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider font-semibold">Multi-User Console</p>
             </div>
           </div>
@@ -361,17 +370,17 @@ export default function App() {
         <div className="p-5 border-t border-slate-900/80 space-y-3.5 text-[10px] text-slate-500 font-mono">
           <div className="flex justify-between items-center bg-slate-950/40 px-2.5 py-1.5 rounded-lg border border-slate-900">
             <span className="flex items-center gap-1">
-              <Clock size={10} /> UTC Server Clock
+              <Clock size={10} className="text-emerald-400" /> UTC+06:00 Clock
             </span>
-            <span className="text-slate-400 font-semibold">
-              {new Date().toISOString().substring(11, 16)}
+            <span className="text-emerald-400 font-semibold font-mono">
+              {clockTimeUtc6}
             </span>
           </div>
           
           <div className="flex justify-between items-center">
             <span>NextDNS Node:</span>
-            <span className={state.settings.nextDnsApiKey ? 'text-emerald-400 font-bold' : 'text-amber-500 font-semibold'}>
-              {state.settings.nextDnsApiKey ? 'Connected' : 'Demo Mode'}
+            <span className={currentState.settings.nextDnsApiKey ? 'text-emerald-400 font-bold' : 'text-amber-500 font-semibold'}>
+              {currentState.settings.nextDnsApiKey ? 'Connected' : 'Demo Mode'}
             </span>
           </div>
         </div>
@@ -384,35 +393,39 @@ export default function App() {
           <ErrorBoundary key={activeTab}>
             {activeTab === 'dashboard' && (
               <DashboardView 
-                state={state} 
+                state={currentState} 
                 onSyncAll={handleSyncAll} 
                 syncing={syncing}
                 onNavigate={(tab) => setActiveTab(tab as TabType)}
+                loading={isInitialLoading}
               />
             )}
 
             {activeTab === 'blocklists' && (
               <BlocklistConfigView 
-                blocklists={state.blocklists || { general: [], perUser: { router: [], mine: [], ammu: [], abbu: [], others: [] } }} 
+                blocklists={currentState.blocklists} 
                 onSaveBlocklists={handleSaveBlocklists}
                 onSync={handleSyncAll}
                 syncing={syncing}
+                loading={isInitialLoading}
               />
             )}
 
             {activeTab === 'watchlist' && (
               <WatchlistView 
-                watchlist={state.watchlist || { domains: [] }} 
+                watchlist={currentState.watchlist} 
                 onSaveWatchlist={handleSaveWatchlist}
+                loading={isInitialLoading}
               />
             )}
 
             {activeTab === 'feeds' && (
               <ThreatFeedView 
-                feeds={state.threatFeeds || []} 
+                feeds={currentState.threatFeeds} 
                 onIngest={handleIngestFeeds} 
                 onSaveFeeds={handleSaveThreatFeeds}
                 ingesting={ingesting}
+                loading={isInitialLoading}
               />
             )}
 
@@ -422,8 +435,8 @@ export default function App() {
 
             {activeTab === 'logs' && (
               <SecurityLogsView 
-                logs={state.logs || []} 
-                alerts={state.alerts || []} 
+                logs={currentState.logs} 
+                alerts={currentState.alerts} 
                 onClearLogs={handleClearLogs}
                 onRefresh={async () => {
                   setRefreshingLogs(true);
@@ -431,16 +444,18 @@ export default function App() {
                   setRefreshingLogs(false);
                 }}
                 refreshing={refreshingLogs}
+                loading={isInitialLoading}
               />
             )}
 
             {activeTab === 'settings' && (
               <SettingsView 
-                settings={state.settings || { telegramBotToken: '', telegramChatId: '', nextDnsApiKey: '', autoSyncIntervalMinutes: 30, emailAlertsEnabled: false }} 
+                settings={currentState.settings} 
                 onSaveSettings={handleSaveSettings} 
                 onResetDatabase={handleResetDatabase}
                 onSyncAll={handleSyncAll}
                 syncing={syncing}
+                loading={isInitialLoading}
               />
             )}
           </ErrorBoundary>

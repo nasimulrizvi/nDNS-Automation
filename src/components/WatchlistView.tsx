@@ -3,13 +3,15 @@ import { Watchlist } from '../types';
 import { ClientAPI } from '../api';
 import { ShieldAlert, Plus, Trash2, Search, AlertCircle, Terminal, Send, CheckCircle2 } from 'lucide-react';
 import { motion } from 'motion/react';
+import Skeleton from './Skeleton';
 
 interface WatchlistViewProps {
   watchlist: Watchlist;
   onSaveWatchlist: (newWatchlist: Watchlist) => Promise<void>;
+  loading?: boolean;
 }
 
-export default function WatchlistView({ watchlist, onSaveWatchlist }: WatchlistViewProps) {
+export default function WatchlistView({ watchlist = { domains: [] }, onSaveWatchlist, loading = false }: WatchlistViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [newDomain, setNewDomain] = useState('');
   const [error, setError] = useState('');
@@ -122,7 +124,11 @@ export default function WatchlistView({ watchlist, onSaveWatchlist }: WatchlistV
           </div>
 
           <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl overflow-hidden">
-            {filteredDomains.length === 0 ? (
+            {loading ? (
+              <div className="p-4">
+                <Skeleton variant="list-item" count={4} />
+              </div>
+            ) : filteredDomains.length === 0 ? (
               <div className="p-8 text-center text-slate-500 space-y-1">
                 <p className="text-sm font-semibold">Watchlist is empty</p>
                 <p className="text-xs">Add high-sensitivity target domains using the controller on the right.</p>

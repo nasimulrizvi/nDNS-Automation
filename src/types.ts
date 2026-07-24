@@ -26,10 +26,32 @@ export interface AppSettings {
   };
 }
 
+export interface DenylistItem {
+  domain: string;
+  alertEnabled: boolean;
+  addedAt?: string;
+  updatedBy?: 'native' | 'app';
+}
+
+export type DenylistEntry = string | DenylistItem;
+
+export interface ProfileSyncStatus {
+  lastSyncedAt: string;
+  lastChangedBy: 'native' | 'app' | 'sync';
+  lastChangeSummary: string;
+}
+
 export interface Blocklists {
-  general: string[];
+  general: DenylistEntry[];
   perUser: {
-    [username: string]: string[];
+    [username: string]: DenylistEntry[];
+  };
+  lastSyncedAt?: string;
+  profileLastSyncedAt?: {
+    [key: string]: string;
+  };
+  profileSyncStatus?: {
+    [key: string]: ProfileSyncStatus;
   };
 }
 
@@ -42,6 +64,7 @@ export interface ThreatFeed {
   name: string;
   url: string;
   enabled: boolean;
+  isPrimaryNative?: boolean;
   lastChecked?: string;
   domainsAdded?: number;
   status: 'success' | 'failed' | 'never';
@@ -94,9 +117,11 @@ export interface DeviceBlockedDomain {
 }
 
 export interface DeviceAnalytics {
+  id?: string;
   deviceName: string;
   clientIp: string;
   profileName: string;
+  profileId?: string;
   totalQueries: number;
   blockedQueries: number;
   blockedPercentage: number;

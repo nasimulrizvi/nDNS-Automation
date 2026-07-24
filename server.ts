@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import { ServerDB } from './server-db';
 import { NextDNSService } from './server-nextdns';
 import { ThreatFeedService } from './server-threatfeed';
+import { TelegramBotService } from './server-telegram';
 
 async function startServer() {
   const app = express();
@@ -14,6 +15,22 @@ async function startServer() {
   // Bootstrap JSON storage schemas and load listeners
   await ServerDB.initialize();
   NextDNSService.startAllMonitors();
+
+  // --- TELEGRAM BOT WEBHOOK & COMMAND ROUTES ---
+
+  // Webhook handler called by Telegram
+  app.post('/api/telegram/webhook', TelegramBotService.handleWebhook);
+
+  // Manual or automatic Webhook Setup route
+  app.post('/api/telegram/setup-webhook', async (req, res) => {
+    try {
+      const hostUrl = req.body.webhookUrl || `${req.protocol}://${req.get('host')}`;
+      const result = await TelegramBotService.registerWebhook(hostUrl);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
 
   // --- API ROUTES FIRST ---
 
@@ -139,7 +156,8 @@ async function startServer() {
 
       const pad = (n: number) => n.toString().padStart(2, '0');
       const now = new Date();
-      const timeFormatted = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      const utc6 = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+      const timeFormatted = `${utc6.getUTCFullYear()}-${pad(utc6.getUTCMonth() + 1)}-${pad(utc6.getUTCDate())} ${pad(utc6.getUTCHours())}:${pad(utc6.getUTCMinutes())}:${pad(utc6.getUTCSeconds())}`;
 
       const alertMsg = `🚨 <b>[TEST] Watchlist Access Violation Triggered!</b>\n\n` +
         `Profile: <b>${testProfile}</b>\n` +

@@ -183,6 +183,16 @@ export class ServerDB {
     // Initialize Threat Feeds
     const defaultThreatFeeds: ThreatFeed[] = [
       {
+        id: 'nextdns-native-threats',
+        name: 'NextDNS Native Threat Intelligence Feeds',
+        url: 'https://api.nextdns.io/profiles/*/security',
+        enabled: true,
+        isPrimaryNative: true,
+        lastChecked: new Date().toISOString(),
+        domainsAdded: 0,
+        status: 'success'
+      },
+      {
         id: 'urlhaus',
         name: 'URLhaus Malware List',
         url: 'https://urlhaus.abuse.ch/downloads/text/',
@@ -322,7 +332,20 @@ export class ServerDB {
     await this.initialize();
     const release = await this.dbMutex.lock();
     try {
-      return JSON.parse(await fs.readFile(THREAT_FEEDS_FILE, 'utf-8'));
+      const feeds = JSON.parse(await fs.readFile(THREAT_FEEDS_FILE, 'utf-8')) as ThreatFeed[];
+      if (!feeds.some(f => f.id === 'nextdns-native-threats')) {
+        feeds.unshift({
+          id: 'nextdns-native-threats',
+          name: 'NextDNS Native Threat Intelligence Feeds',
+          url: 'https://api.nextdns.io/profiles/*/security',
+          enabled: true,
+          isPrimaryNative: true,
+          lastChecked: new Date().toISOString(),
+          domainsAdded: 0,
+          status: 'success'
+        });
+      }
+      return feeds;
     } finally {
       release();
     }

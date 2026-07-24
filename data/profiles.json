@@ -1,18 +1,18 @@
 [
   {
     "id": "3e1c94",
-    "name": "Router",
+    "name": "General",
     "deviceCount": 7,
-    "activeRulesCount": 16,
-    "queriesLast7Days": 150558,
-    "blocksLast7Days": 48708,
+    "activeRulesCount": 10,
+    "queriesLast7Days": 146309,
+    "blocksLast7Days": 44734,
     "status": "active"
   },
   {
     "id": "d76372",
     "name": "MINE",
     "deviceCount": 0,
-    "activeRulesCount": 18,
+    "activeRulesCount": 10,
     "queriesLast7Days": 0,
     "blocksLast7Days": 0,
     "status": "active"
@@ -21,7 +21,7 @@
     "id": "c9e833",
     "name": "AMMU",
     "deviceCount": 0,
-    "activeRulesCount": 18,
+    "activeRulesCount": 10,
     "queriesLast7Days": 0,
     "blocksLast7Days": 0,
     "status": "active"
@@ -30,7 +30,7 @@
     "id": "92b815",
     "name": "ABBU",
     "deviceCount": 0,
-    "activeRulesCount": 18,
+    "activeRulesCount": 10,
     "queriesLast7Days": 0,
     "blocksLast7Days": 0,
     "status": "active"
@@ -39,9 +39,18 @@
     "id": "38db7e",
     "name": "Others",
     "deviceCount": 1,
-    "activeRulesCount": 18,
+    "activeRulesCount": 10,
     "queriesLast7Days": 2947,
     "blocksLast7Days": 253,
+    "status": "active"
+  },
+  {
+    "id": "151eaf",
+    "name": "Router",
+    "deviceCount": 1,
+    "activeRulesCount": 8,
+    "queriesLast7Days": 270,
+    "blocksLast7Days": 79,
     "status": "active"
   }
 ]

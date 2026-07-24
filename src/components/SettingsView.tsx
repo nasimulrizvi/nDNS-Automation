@@ -1,7 +1,9 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { AppSettings } from '../types';
+import { formatDateTimeUtcPlus6 } from '../date-utils';
 import { Settings, Shield, Bot, Send, Trash2, Eye, EyeOff, CheckCircle, AlertCircle, RefreshCw, HardDrive } from 'lucide-react';
 import { motion } from 'motion/react';
+import Skeleton from './Skeleton';
 
 interface SettingsViewProps {
   settings: AppSettings;
@@ -9,9 +11,10 @@ interface SettingsViewProps {
   onResetDatabase: () => Promise<void>;
   onSyncAll?: () => Promise<void>;
   syncing?: boolean;
+  loading?: boolean;
 }
 
-export default function SettingsView({ settings, onSaveSettings, onResetDatabase, onSyncAll, syncing }: SettingsViewProps) {
+export default function SettingsView({ settings = { telegramBotToken: '', telegramChatId: '', nextDnsApiKey: '', emailAlertsEnabled: false }, onSaveSettings, onResetDatabase, onSyncAll, syncing, loading = false }: SettingsViewProps) {
   const [apiKey, setApiKey] = useState(settings.nextDnsApiKey || '');
   const [botToken, setBotToken] = useState(settings.telegramBotToken || '');
   const [chatId, setChatId] = useState(settings.telegramChatId || '');
@@ -29,6 +32,34 @@ export default function SettingsView({ settings, onSaveSettings, onResetDatabase
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const [registeringWebhook, setRegisteringWebhook] = useState(false);
+
+  const handleRegisterWebhook = async () => {
+    if (!botToken) {
+      setStatus({ type: 'error', message: 'Please provide a Telegram Bot Token first.' });
+      return;
+    }
+    setRegisteringWebhook(true);
+    setStatus(null);
+    try {
+      const res = await fetch('/api/telegram/setup-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhookUrl: window.location.origin })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatus({ type: 'success', message: data.message });
+      } else {
+        throw new Error(data.message || 'Webhook registration failed');
+      }
+    } catch (err: any) {
+      setStatus({ type: 'error', message: err.message || 'Failed to register webhook' });
+    } finally {
+      setRegisteringWebhook(false);
+    }
+  };
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
@@ -65,7 +96,7 @@ export default function SettingsView({ settings, onSaveSettings, onResetDatabase
       const message = `🤖 <b>NextDNS Automation — Test Dispatch</b>\n\n` +
         `✅ Your Telegram notification integration is active and correctly configured!\n` +
         `🌐 <b>Host Container:</b> Cloud Run Sandbox\n` +
-        `⏰ <b>Timestamp:</b> ${new Date().toLocaleString()}\n\n` +
+        `⏰ <b>Timestamp:</b> ${formatDateTimeUtcPlus6(new Date())} (UTC+06:00)\n\n` +
         `<i>Real-time security alerts will stream to this chat.</i>`;
 
       const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
@@ -114,7 +145,10 @@ export default function SettingsView({ settings, onSaveSettings, onResetDatabase
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Settings Form Panel */}
         <div className="lg:col-span-2 space-y-4">
-          <form onSubmit={handleSave} className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-6">
+          {loading ? (
+            <Skeleton variant="card" count={2} />
+          ) : (
+            <form onSubmit={handleSave} className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-6">
             
             {/* Status alerts */}
             {status && (
@@ -205,7 +239,17 @@ export default function SettingsView({ settings, onSaveSettings, onResetDatabase
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-1">
+              <div className="flex flex-wrap justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleRegisterWebhook}
+                  disabled={registeringWebhook || !botToken}
+                  className="bg-purple-950/60 hover:bg-purple-900/60 border border-purple-800/60 text-purple-300 hover:text-purple-100 font-bold text-xs py-2 px-3.5 rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
+                  id="register-webhook-button"
+                >
+                  <Bot size={12} className={registeringWebhook ? 'animate-spin' : ''} />
+                  {registeringWebhook ? 'Registering...' : 'Register Bot Webhook'}
+                </button>
                 <button
                   type="button"
                   onClick={handleTestTelegram}
@@ -216,6 +260,21 @@ export default function SettingsView({ settings, onSaveSettings, onResetDatabase
                   <Send size={12} className={testing ? 'animate-spin' : ''} />
                   {testing ? 'Sending Test...' : 'Test Telegram Dispatch'}
                 </button>
+              </div>
+
+              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80 text-[11px] text-slate-400 space-y-1.5">
+                <div className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Bot size={13} className="text-purple-400" />
+                  <span>Interactive Bot Slash Commands:</span>
+                </div>
+                <div className="font-mono text-[10.5px] text-purple-300/90 leading-relaxed grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 pt-0.5">
+                  <span>• /status — Traffic & block summary</span>
+                  <span>• /block &lt;domain&gt; — Add to Shared Denylist</span>
+                  <span>• /watch &lt;domain&gt; — Add to Watchlist Alerts</span>
+                  <span>• /unwatch &lt;domain&gt; — Remove from Watchlist</span>
+                  <span>• /report — Instant top-domains report</span>
+                  <span>• /help — Show slash commands menu</span>
+                </div>
               </div>
             </div>
 
@@ -232,6 +291,7 @@ export default function SettingsView({ settings, onSaveSettings, onResetDatabase
               </button>
             </div>
           </form>
+          )}
         </div>
 
         {/* Automation & Database Management Column */}

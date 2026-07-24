@@ -64,14 +64,36 @@ export class ThreatFeedService {
     const feedResults: string[] = [];
     let updatedFeeds = [...feeds];
 
-    const currentGeneralSet = new Set(blocklists.general.map(d => d.toLowerCase()));
+    const getDomainStr = (d: any) => (typeof d === 'string' ? d : d?.domain || '').toLowerCase().trim();
+    const currentGeneralSet = new Set(blocklists.general.map(getDomainStr));
 
     for (let i = 0; i < updatedFeeds.length; i++) {
       const feed = updatedFeeds[i];
       if (!feed.enabled) continue;
 
+      if (feed.isPrimaryNative || feed.id === 'nextdns-native-threats') {
+        try {
+          console.log(`Ingesting Primary Threat Source: NextDNS Native Threat Intelligence Feeds...`);
+          const nativeRes = await NextDNSService.syncNativeThreatFeeds();
+          updatedFeeds[i] = {
+            ...feed,
+            lastChecked: new Date().toISOString(),
+            status: nativeRes.success ? 'success' : 'failed'
+          };
+          feedResults.push(`🛡️ ${feed.name} (Primary Source): ${nativeRes.message}`);
+        } catch (err: any) {
+          updatedFeeds[i] = {
+            ...feed,
+            lastChecked: new Date().toISOString(),
+            status: 'failed'
+          };
+          feedResults.push(`❌ ${feed.name}: Native security sync failed (${err.message || err})`);
+        }
+        continue;
+      }
+
       try {
-        console.log(`Ingesting threat feed: ${feed.name}...`);
+        console.log(`Ingesting secondary threat feed: ${feed.name}...`);
         const domains = await this.fetchFeed(feed);
         
         // Find domains we don't have yet
@@ -105,7 +127,12 @@ export class ThreatFeedService {
     await ServerDB.saveThreatFeeds(updatedFeeds);
 
     if (totalAdded > 0) {
-      blocklists.general = Array.from(currentGeneralSet).sort();
+      const updatedGeneral = [...blocklists.general];
+      for (const d of addedDomains) {
+        updatedGeneral.push({ domain: d, alertEnabled: false });
+      }
+      updatedGeneral.sort((a, b) => getDomainStr(a).localeCompare(getDomainStr(b)));
+      blocklists.general = updatedGeneral;
       await ServerDB.saveBlocklists(blocklists);
 
       // Trigger automatic NextDNS sync

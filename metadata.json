@@ -1,5 +1,5 @@
 {
-  "name": "NextDNS Multi-User Automation",
+  "name": "nDNS Automations",
   "description": "A full-stack automation dashboard for managing multi-user NextDNS profiles, synchronized blocklists, real-time alerting, and threat-feed ingestion.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
