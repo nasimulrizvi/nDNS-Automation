@@ -1,18 +1,18 @@
 [
   {
     "id": "3e1c94",
-    "name": "General",
+    "name": "Primary",
     "deviceCount": 7,
-    "activeRulesCount": 10,
-    "queriesLast7Days": 146309,
-    "blocksLast7Days": 44734,
+    "activeRulesCount": 48,
+    "queriesLast7Days": 160153,
+    "blocksLast7Days": 44487,
     "status": "active"
   },
   {
     "id": "d76372",
     "name": "MINE",
     "deviceCount": 0,
-    "activeRulesCount": 10,
+    "activeRulesCount": 11,
     "queriesLast7Days": 0,
     "blocksLast7Days": 0,
     "status": "active"
@@ -21,7 +21,7 @@
     "id": "c9e833",
     "name": "AMMU",
     "deviceCount": 0,
-    "activeRulesCount": 10,
+    "activeRulesCount": 13,
     "queriesLast7Days": 0,
     "blocksLast7Days": 0,
     "status": "active"
@@ -30,7 +30,7 @@
     "id": "92b815",
     "name": "ABBU",
     "deviceCount": 0,
-    "activeRulesCount": 10,
+    "activeRulesCount": 13,
     "queriesLast7Days": 0,
     "blocksLast7Days": 0,
     "status": "active"
@@ -48,9 +48,9 @@
     "id": "151eaf",
     "name": "Router",
     "deviceCount": 1,
-    "activeRulesCount": 8,
-    "queriesLast7Days": 270,
-    "blocksLast7Days": 79,
+    "activeRulesCount": 9,
+    "queriesLast7Days": 17035,
+    "blocksLast7Days": 2791,
     "status": "active"
   }
 ]

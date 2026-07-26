@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { ServerDB } from './server-db';
+import { ServerDB, createOrPreserveDenylistItem, isDomainLocked } from './server-db';
 import { NextDNSService } from './server-nextdns';
 import { ThreatFeedService } from './server-threatfeed';
 import { TelegramBotService } from './server-telegram';
@@ -113,7 +113,71 @@ async function startServer() {
         return res.status(400).json({ success: false, message: 'Blocklists payload missing' });
       }
 
-      await ServerDB.saveBlocklists(blocklists);
+      const currentBlocklists = await ServerDB.getBlocklists();
+      const getDomainKey = (e: any) => (typeof e === 'string' ? e : e?.domain || '').toLowerCase().trim();
+
+      // Check general removals against 24-hour lock
+      const incomingGenSet = new Set((blocklists.general || []).map(getDomainKey));
+      for (const item of (currentBlocklists.general || [])) {
+        const dKey = getDomainKey(item);
+        if (dKey && !incomingGenSet.has(dKey)) {
+          if (isDomainLocked(item)) {
+            return res.status(403).json({
+              success: false,
+              message: `Removal refused: Domain "${dKey}" is locked because its 24-hour grace period has passed.`
+            });
+          }
+        }
+      }
+
+      // Check perUser removals against 24-hour lock
+      for (const uKey of Object.keys(currentBlocklists.perUser || {})) {
+        const curList = currentBlocklists.perUser[uKey] || [];
+        const incList = (blocklists.perUser && blocklists.perUser[uKey]) || [];
+        const incSet = new Set(incList.map(getDomainKey));
+
+        for (const item of curList) {
+          const dKey = getDomainKey(item);
+          if (dKey && !incSet.has(dKey)) {
+            if (isDomainLocked(item)) {
+              return res.status(403).json({
+                success: false,
+                message: `Removal refused: Domain "${dKey}" in profile "${uKey}" is locked because its 24-hour grace period has passed.`
+              });
+            }
+          }
+        }
+      }
+
+      // Sanitize and preserve timestamps for all items in payload
+      const sanitizedGeneral = (blocklists.general || []).map((e: any) => {
+        const d = getDomainKey(e);
+        const alertEnabled = typeof e === 'object' ? Boolean(e.alertEnabled) : false;
+        const forcedAddedAt = typeof e === 'object' && e?.addedAt ? e.addedAt : undefined;
+        return createOrPreserveDenylistItem(d, currentBlocklists, { alertEnabled, forcedAddedAt });
+      });
+
+      const sanitizedPerUser: { [key: string]: any[] } = {};
+      if (blocklists.perUser) {
+        for (const [uKey, list] of Object.entries(blocklists.perUser)) {
+          sanitizedPerUser[uKey] = ((list as any[]) || []).map((e: any) => {
+            const d = getDomainKey(e);
+            const alertEnabled = typeof e === 'object' ? Boolean(e.alertEnabled) : false;
+            const forcedAddedAt = typeof e === 'object' && e?.addedAt ? e.addedAt : undefined;
+            return createOrPreserveDenylistItem(d, currentBlocklists, { alertEnabled, forcedAddedAt });
+          });
+        }
+      }
+
+      const finalBlocklists = {
+        ...blocklists,
+        general: sanitizedGeneral,
+        perUser: sanitizedPerUser,
+      };
+
+      await ServerDB.saveBlocklists(finalBlocklists);
+      await NextDNSService.notifyNewDenylistAdditions(currentBlocklists, finalBlocklists, 'Manual UI');
+
       const syncRes = await NextDNSService.syncAllProfiles();
       res.json({ success: true, message: 'Blocklists saved and synchronized to NextDNS!', sync: syncRes });
     } catch (e: any) {
@@ -126,6 +190,16 @@ async function startServer() {
     try {
       const result = await NextDNSService.pullDenylistsFromNextDNS();
       res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // Timestamp audit report endpoint for deploy/restart verification
+  app.get('/api/blocklists/audit', async (req, res) => {
+    try {
+      const report = await ServerDB.getTimestampAuditReport();
+      res.json({ success: true, ...report });
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message });
     }

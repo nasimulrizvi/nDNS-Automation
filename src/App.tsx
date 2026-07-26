@@ -137,9 +137,13 @@ export default function App() {
   // Save Blocklist Control
   const handleSaveBlocklists = async (newBlocklists: Blocklists) => {
     try {
-      await ClientAPI.saveBlocklists(newBlocklists);
+      const res = await ClientAPI.saveBlocklists(newBlocklists);
       setState(prev => prev ? { ...prev, blocklists: newBlocklists } : null);
-      showNotification('success', 'Blocklists updated locally. Pending sync.');
+      if (res?.sync && !res.sync.success) {
+        showNotification('error', `Blocklists saved, but NextDNS Sync Notice: ${res.sync.message}`);
+      } else {
+        showNotification('success', 'Blocklists saved and synchronized to NextDNS.');
+      }
     } catch (e: any) {
       showNotification('error', e.message || 'Could not save blocklists');
       throw e;
@@ -380,7 +384,7 @@ export default function App() {
           <div className="flex justify-between items-center">
             <span>NextDNS Node:</span>
             <span className={currentState.settings.nextDnsApiKey ? 'text-emerald-400 font-bold' : 'text-amber-500 font-semibold'}>
-              {currentState.settings.nextDnsApiKey ? 'Connected' : 'Demo Mode'}
+              {currentState.settings.nextDnsApiKey ? 'Connected' : 'Disconnected'}
             </span>
           </div>
         </div>
@@ -404,6 +408,7 @@ export default function App() {
             {activeTab === 'blocklists' && (
               <BlocklistConfigView 
                 blocklists={currentState.blocklists} 
+                profiles={currentState.profiles}
                 onSaveBlocklists={handleSaveBlocklists}
                 onSync={handleSyncAll}
                 syncing={syncing}
@@ -430,7 +435,10 @@ export default function App() {
             )}
 
             {activeTab === 'analytics' && (
-              <AnalyticsView />
+              <AnalyticsView 
+                hasApiKey={Boolean(currentState.settings?.nextDnsApiKey)} 
+                onNavigate={(tab) => setActiveTab(tab)}
+              />
             )}
 
             {activeTab === 'logs' && (
@@ -445,6 +453,7 @@ export default function App() {
                 }}
                 refreshing={refreshingLogs}
                 loading={isInitialLoading}
+                hasApiKey={Boolean(currentState.settings?.nextDnsApiKey)}
               />
             )}
 

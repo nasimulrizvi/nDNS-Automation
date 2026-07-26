@@ -1,40 +1,88 @@
 import { useState, FormEvent } from 'react';
-import { Blocklists, DenylistEntry, DenylistItem } from '../types';
-import { ClientAPI } from '../api';
-import { Shield, Plus, Trash2, Search, AlertCircle, RefreshCw, Globe, Wifi, User, Heart, ShieldCheck, Users, CheckCircle2, Bell, BellOff, Volume2, VolumeX, Info } from 'lucide-react';
+import { Blocklists, DenylistEntry, DenylistItem, NextDNSProfile } from '../types';
+import { Shield, Plus, Trash2, Search, AlertCircle, RefreshCw, Globe, Wifi, User, Heart, ShieldCheck, Users, Info, Lock, Bell, BellOff, VolumeX } from 'lucide-react';
 import { motion } from 'motion/react';
 import Skeleton from './Skeleton';
 
 interface BlocklistConfigViewProps {
   blocklists: Blocklists;
+  profiles?: NextDNSProfile[];
   onSaveBlocklists: (newBlocklists: Blocklists) => Promise<void>;
   onSync: () => Promise<void>;
   syncing: boolean;
   loading?: boolean;
 }
 
-type ListType = 'general' | 'router' | 'mine' | 'ammu' | 'abbu' | 'others';
+function getProfileKey(profile: { id?: string; name?: string }): string {
+  if (!profile) return 'others';
+  const name = profile.name || '';
+  if (!name) return profile.id || 'others';
+  const clean = name.toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
+  return clean || profile.id || 'others';
+}
 
 interface NormalizedDomain {
   domain: string;
   alertEnabled: boolean;
+  addedAt?: string;
+  isLocked: boolean;
+  remainingHours?: number;
   originalEntry: DenylistEntry;
 }
 
-export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSync, syncing, loading = false }: BlocklistConfigViewProps) {
-  const [activeTab, setActiveTab] = useState<ListType>('general');
+export default function BlocklistConfigView({ blocklists, profiles = [], onSaveBlocklists, onSync, syncing, loading = false }: BlocklistConfigViewProps) {
+  const [activeTab, setActiveTab] = useState<string>('general');
   const [searchQuery, setSearchQuery] = useState('');
   const [newDomain, setNewDomain] = useState('');
   const [error, setError] = useState('');
   const [unsyncedChanges, setUnsyncedChanges] = useState(false);
 
+  // Default profiles fallback if profiles list is empty
+  const defaultFallbackProfiles: NextDNSProfile[] = [
+    { id: '3e1c94', name: 'Primary', deviceCount: 0, activeRulesCount: 0, queriesLast7Days: 0, blocksLast7Days: 0, status: 'active' },
+    { id: '151eaf', name: 'Router', deviceCount: 0, activeRulesCount: 0, queriesLast7Days: 0, blocksLast7Days: 0, status: 'active' },
+    { id: 'd76372', name: 'MINE', deviceCount: 0, activeRulesCount: 0, queriesLast7Days: 0, blocksLast7Days: 0, status: 'active' },
+    { id: 'c9e833', name: 'AMMU', deviceCount: 0, activeRulesCount: 0, queriesLast7Days: 0, blocksLast7Days: 0, status: 'active' },
+    { id: '92b815', name: 'ABBU', deviceCount: 0, activeRulesCount: 0, queriesLast7Days: 0, blocksLast7Days: 0, status: 'active' },
+    { id: '38db7e', name: 'Others', deviceCount: 0, activeRulesCount: 0, queriesLast7Days: 0, blocksLast7Days: 0, status: 'active' },
+  ];
+
+  const profilesList = profiles && profiles.length > 0 ? profiles : defaultFallbackProfiles;
+
   const normalize = (entry: DenylistEntry): NormalizedDomain => {
+    let domain = '';
+    let alertEnabled = false;
+    let addedAt: string | undefined = undefined;
+
     if (typeof entry === 'string') {
-      return { domain: entry.trim(), alertEnabled: false, originalEntry: entry };
+      domain = entry.trim();
+    } else if (entry) {
+      domain = (entry.domain || '').trim();
+      alertEnabled = Boolean(entry.alertEnabled);
+      addedAt = entry.addedAt;
     }
+
+    let isLocked = true;
+    let remainingHours: number | undefined = undefined;
+
+    if (addedAt) {
+      const addedMs = new Date(addedAt).getTime();
+      if (!isNaN(addedMs)) {
+        const elapsedMs = Date.now() - addedMs;
+        const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+        if (elapsedMs <= TWENTY_FOUR_HOURS_MS) {
+          isLocked = false;
+          remainingHours = Math.max(1, Math.ceil((TWENTY_FOUR_HOURS_MS - elapsedMs) / (60 * 60 * 1000)));
+        }
+      }
+    }
+
     return {
-      domain: (entry?.domain || '').trim(),
-      alertEnabled: Boolean(entry?.alertEnabled),
+      domain,
+      alertEnabled,
+      addedAt,
+      isLocked,
+      remainingHours,
       originalEntry: entry
     };
   };
@@ -44,7 +92,7 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
     if (activeTab === 'general') {
       return blocklists.general || [];
     }
-    return blocklists.perUser[activeTab] || [];
+    return (blocklists.perUser && blocklists.perUser[activeTab]) || [];
   };
 
   const getActiveItems = (): NormalizedDomain[] => {
@@ -69,8 +117,8 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
       return;
     }
 
-    // Default state for newly added Denylist domain: alerts OFF
-    const newEntry: DenylistItem = { domain, alertEnabled: false };
+    // Default state for newly added Denylist domain: alerts OFF + 24h timer initialized
+    const newEntry: DenylistItem = { domain, alertEnabled: false, addedAt: new Date().toISOString() };
     const updatedBlocklists = { ...blocklists };
 
     const sortFn = (a: DenylistEntry, b: DenylistEntry) =>
@@ -100,6 +148,13 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
 
   const handleDeleteDomain = async (domain: string) => {
     setError('');
+
+    const targetItem = getActiveItems().find(i => i.domain.toLowerCase() === domain.toLowerCase());
+    if (targetItem && targetItem.isLocked) {
+      setError('Locked — 24-hour grace period has passed. This domain can no longer be removed via nDNS Automations.');
+      return;
+    }
+
     const updatedBlocklists = { ...blocklists };
 
     const filterOut = (list: DenylistEntry[]) =>
@@ -130,7 +185,12 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
       list.map(entry => {
         const norm = normalize(entry);
         if (norm.domain.toLowerCase() === domain.toLowerCase()) {
-          return { domain: norm.domain, alertEnabled: !norm.alertEnabled };
+          return {
+            domain: norm.domain,
+            alertEnabled: !norm.alertEnabled,
+            addedAt: norm.addedAt,
+            updatedBy: (norm.originalEntry && typeof norm.originalEntry === 'object' && (norm.originalEntry as any).updatedBy) || 'app'
+          };
         }
         return entry;
       });
@@ -140,7 +200,7 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
     } else {
       updatedBlocklists.perUser = {
         ...blocklists.perUser,
-        [activeTab]: toggleInList(blocklists.perUser[activeTab] || [])
+        [activeTab]: toggleInList((blocklists.perUser && blocklists.perUser[activeTab]) || [])
       };
     }
 
@@ -157,10 +217,15 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
     const updatedBlocklists = { ...blocklists };
 
     const setInList = (list: DenylistEntry[]) =>
-      (list || []).map(entry => ({
-        domain: normalize(entry).domain,
-        alertEnabled: enable
-      }));
+      (list || []).map(entry => {
+        const norm = normalize(entry);
+        return {
+          domain: norm.domain,
+          alertEnabled: enable,
+          addedAt: norm.addedAt,
+          updatedBy: (norm.originalEntry && typeof norm.originalEntry === 'object' && (norm.originalEntry as any).updatedBy) || 'app'
+        };
+      });
 
     if (applyGlobally) {
       updatedBlocklists.general = setInList(blocklists.general);
@@ -175,7 +240,7 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
       } else {
         updatedBlocklists.perUser = {
           ...blocklists.perUser,
-          [activeTab]: setInList(blocklists.perUser[activeTab] || [])
+          [activeTab]: setInList((blocklists.perUser && blocklists.perUser[activeTab]) || [])
         };
       }
     }
@@ -196,27 +261,27 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
   const alertingCount = activeItems.filter(i => i.alertEnabled).length;
   const mutedCount = activeItems.length - alertingCount;
 
-  const renderTabIcon = (tab: ListType) => {
-    switch (tab) {
-      case 'general': return <Globe size={15} className="shrink-0 text-blue-400" />;
-      case 'router': return <Wifi size={15} className="shrink-0 text-cyan-400" />;
-      case 'mine': return <User size={15} className="shrink-0 text-emerald-400" />;
-      case 'ammu': return <Heart size={15} className="shrink-0 text-pink-400" />;
-      case 'abbu': return <ShieldCheck size={15} className="shrink-0 text-indigo-400" />;
-      case 'others': return <Users size={15} className="shrink-0 text-amber-400" />;
-    }
+  const renderTabIcon = (tabKey: string, tabName?: string) => {
+    if (tabKey === 'general') return <Globe size={15} className="shrink-0 text-blue-400" />;
+    const nameLower = (tabName || tabKey).toLowerCase();
+    if (nameLower.includes('router')) return <Wifi size={15} className="shrink-0 text-cyan-400" />;
+    if (nameLower.includes('primary')) return <Shield size={15} className="shrink-0 text-blue-400" />;
+    if (nameLower.includes('mine')) return <User size={15} className="shrink-0 text-emerald-400" />;
+    if (nameLower.includes('ammu')) return <Heart size={15} className="shrink-0 text-pink-400" />;
+    if (nameLower.includes('abbu')) return <ShieldCheck size={15} className="shrink-0 text-indigo-400" />;
+    return <Users size={15} className="shrink-0 text-amber-400" />;
   };
 
-  const getTabLabel = (tab: ListType): string => {
-    switch (tab) {
-      case 'general': return 'Shared General';
-      case 'router': return 'Router';
-      case 'mine': return 'MINE';
-      case 'ammu': return 'AMMU';
-      case 'abbu': return 'ABBU';
-      case 'others': return 'Others';
-    }
+  const getTabLabel = (tabKey: string): string => {
+    if (tabKey === 'general') return 'Shared General';
+    const matchedProfile = profilesList.find(p => getProfileKey(p) === tabKey || p.id === tabKey);
+    return matchedProfile ? matchedProfile.name : tabKey.toUpperCase();
   };
+
+  const allTabs = [
+    { key: 'general', label: 'Shared General' },
+    ...profilesList.map(p => ({ key: getProfileKey(p), label: p.name }))
+  ];
 
   return (
     <div className="space-y-6" id="blocklist-config-container">
@@ -251,22 +316,22 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-px" id="blocklist-tabs">
-        {(['general', 'router', 'mine', 'ammu', 'abbu', 'others'] as ListType[]).map(tab => (
+        {allTabs.map(tab => (
           <button
-            key={tab}
+            key={tab.key}
             onClick={() => {
-              setActiveTab(tab);
+              setActiveTab(tab.key);
               setSearchQuery('');
               setError('');
             }}
             className={`px-4 py-2.5 font-semibold text-xs sm:text-sm rounded-t-lg transition border-b-2 -mb-px flex items-center gap-2 ${
-              activeTab === tab
+              activeTab === tab.key
                 ? 'border-blue-500 text-blue-400 bg-blue-500/5'
                 : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
             }`}
           >
-            {renderTabIcon(tab)}
-            <span>{getTabLabel(tab)}</span>
+            {renderTabIcon(tab.key, tab.label)}
+            <span>{tab.label}</span>
           </button>
         ))}
       </div>
@@ -400,13 +465,31 @@ export default function BlocklistConfigView({ blocklists, onSaveBlocklists, onSy
                         )}
                       </button>
 
-                      <button
-                        onClick={() => handleDeleteDomain(item.domain)}
-                        className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 opacity-60 group-hover:opacity-100 focus:opacity-100 transition"
-                        title="Remove domain block rule"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {item.isLocked ? (
+                        <div
+                          className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-950/80 border border-slate-800 text-[10.5px] text-slate-500 cursor-not-allowed select-none"
+                          title="Locked — 24-hour grace period has passed. This domain can no longer be removed via nDNS Automations."
+                        >
+                          <Lock size={12} className="text-amber-500/80 shrink-0" />
+                          <span className="font-semibold text-slate-400">Locked (24h)</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span 
+                            className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded"
+                            title={`Added within 24 hours. Grace period expires in ${item.remainingHours}h.`}
+                          >
+                            {item.remainingHours}h left
+                          </span>
+                          <button
+                            onClick={() => handleDeleteDomain(item.domain)}
+                            className="text-slate-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 transition"
+                            title="Remove domain block rule (Within 24h grace period)"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 ))}

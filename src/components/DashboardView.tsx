@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { NextDNSProfile, SystemState, DeviceAnalytics } from '../types';
 import { ClientAPI } from '../api';
 import { formatTimeUtcPlus6, formatDateTimeUtcPlus6 } from '../date-utils';
-import { Shield, Smartphone, RefreshCw, Layers, CheckCircle, Search, Laptop, User, Wifi, Eye, X } from 'lucide-react';
+import { Shield, Smartphone, RefreshCw, Layers, CheckCircle, Search, Laptop, User, Wifi, Eye, X, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Skeleton from './Skeleton';
 
@@ -80,6 +80,26 @@ export default function DashboardView({ state, onSyncAll, syncing, onNavigate, l
 
   return (
     <div className="space-y-6">
+      {!settings?.nextDnsApiKey && (
+        <div className="bg-amber-950/50 border border-amber-500/40 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4" id="api-key-missing-banner">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="text-amber-400 shrink-0" size={22} />
+            <div>
+              <h4 className="font-bold text-amber-200 text-sm">Connect Your NextDNS Account</h4>
+              <p className="text-xs text-amber-300/80 mt-0.5">
+                Enter your NextDNS API Key in Settings to enable real-time profile telemetry, query metrics, and automated denylist synchronization.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigate('settings')}
+            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs shrink-0 transition"
+          >
+            Configure API Key
+          </button>
+        </div>
+      )}
+
       {/* Overview Header Bar */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/60 border border-slate-800 rounded-xl p-5">
         <div>
@@ -247,8 +267,30 @@ export default function DashboardView({ state, onSyncAll, syncing, onNavigate, l
               </span>
             </div>
 
-            {loading || profiles.length === 0 ? (
+            {loading ? (
               <Skeleton variant="profile-card" count={6} />
+            ) : !settings?.nextDnsApiKey ? (
+              <div className="bg-amber-950/20 border border-amber-500/20 rounded-xl p-8 text-center space-y-3">
+                <Shield className="mx-auto text-amber-400" size={32} />
+                <h3 className="text-amber-200 font-bold text-sm">NextDNS Account Disconnected</h3>
+                <p className="text-xs text-amber-300/80 max-w-md mx-auto">
+                  Please configure your NextDNS API key in Settings to connect your account and view profile metrics.
+                </p>
+                <button
+                  onClick={() => onNavigate('settings')}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs transition"
+                >
+                  Configure API Key
+                </button>
+              </div>
+            ) : profiles.length === 0 ? (
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-8 text-center space-y-2">
+                <Layers className="mx-auto text-slate-600" size={32} />
+                <h3 className="text-slate-300 font-bold text-sm">No NextDNS Profiles Found</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  No active profiles were returned by NextDNS for your API key. Check your NextDNS dashboard to ensure your profiles are created.
+                </p>
+              </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {profiles.map((profile, idx) => {

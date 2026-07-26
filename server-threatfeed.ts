@@ -1,4 +1,4 @@
-import { ServerDB } from './server-db';
+import { ServerDB, createOrPreserveDenylistItem } from './server-db';
 import { NextDNSService } from './server-nextdns';
 import { ThreatFeed } from './src/types';
 
@@ -127,13 +127,15 @@ export class ThreatFeedService {
     await ServerDB.saveThreatFeeds(updatedFeeds);
 
     if (totalAdded > 0) {
+      const oldBlocklists = await ServerDB.getBlocklists();
       const updatedGeneral = [...blocklists.general];
       for (const d of addedDomains) {
-        updatedGeneral.push({ domain: d, alertEnabled: false });
+        updatedGeneral.push(createOrPreserveDenylistItem(d, oldBlocklists, { alertEnabled: false, updatedBy: 'app' }));
       }
       updatedGeneral.sort((a, b) => getDomainStr(a).localeCompare(getDomainStr(b)));
       blocklists.general = updatedGeneral;
       await ServerDB.saveBlocklists(blocklists);
+      await NextDNSService.notifyNewDenylistAdditions(oldBlocklists, blocklists, 'Threat Feed');
 
       // Trigger automatic NextDNS sync
       const syncResult = await NextDNSService.syncAllProfiles();

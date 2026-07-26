@@ -1,11 +1,11 @@
 import { Request, Response } from 'express';
-import { ServerDB } from './server-db';
-import { NextDNSService } from './server-nextdns';
+import { ServerDB, createOrPreserveDenylistItem } from './server-db';
+import { NextDNSService, getProfileKey } from './server-nextdns';
 
 export class TelegramBotService {
   
   // Send reply message to a chat
-  static async sendReply(chatId: string | number, text: string): Promise<boolean> {
+  static async sendReply(chatId: string | number, text: string, replyMarkup?: any): Promise<boolean> {
     const settings = await ServerDB.getSettings();
     if (!settings.telegramBotToken) {
       console.warn('[TelegramBot] Cannot send reply: Bot token missing');
@@ -14,15 +14,20 @@ export class TelegramBotService {
 
     try {
       const url = `https://api.telegram.org/bot${settings.telegramBotToken}/sendMessage`;
+      const payload: any = {
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      };
+      if (replyMarkup) {
+        payload.reply_markup = replyMarkup;
+      }
+
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text,
-          parse_mode: 'HTML',
-          disable_web_page_preview: true
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
@@ -33,6 +38,27 @@ export class TelegramBotService {
       return true;
     } catch (err) {
       console.error('[TelegramBot] Error sending reply:', err);
+      return false;
+    }
+  }
+
+  // Answer inline callback query
+  static async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean> {
+    const settings = await ServerDB.getSettings();
+    if (!settings.telegramBotToken) return false;
+    try {
+      const url = `https://api.telegram.org/bot${settings.telegramBotToken}/answerCallbackQuery`;
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callback_query_id: callbackQueryId,
+          text: text || ''
+        })
+      });
+      return true;
+    } catch (err) {
+      console.error('[TelegramBot] Error answering callback query:', err);
       return false;
     }
   }
@@ -56,6 +82,29 @@ export class TelegramBotService {
       });
 
       const json = await res.json() as any;
+
+      // Also set bot commands menu for BotFather
+      try {
+        const cmdUrl = `https://api.telegram.org/bot${settings.telegramBotToken}/setMyCommands`;
+        await fetch(cmdUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commands: [
+              { command: 'status', description: 'Quick traffic & block summary across profiles' },
+              { command: 'block', description: 'Add domain to Shared General, or a specific profile' },
+              { command: 'unblock', description: 'Unblock domain (within 24h) from Shared General or profile' },
+              { command: 'watch', description: 'Add domain to Watchlist Alerts' },
+              { command: 'unwatch', description: 'Remove domain from Watchlist' },
+              { command: 'report', description: 'Generate on-demand Security & Top Domains Report' },
+              { command: 'help', description: 'Show available bot commands' }
+            ]
+          })
+        });
+      } catch (e) {
+        console.warn('[TelegramBot] Could not setMyCommands:', e);
+      }
+
       if (res.ok && json.ok) {
         return { success: true, message: `Telegram Webhook successfully set to ${webhookUrl}`, webhookUrl };
       } else {
@@ -75,19 +124,31 @@ export class TelegramBotService {
       const update = req.body;
       if (!update) return;
 
+      const settings = await ServerDB.getSettings();
+      const authorizedChatId = settings.telegramChatId ? settings.telegramChatId.toString().trim() : '';
+
+      // Handle Callback Queries (inline keyboard button taps)
+      if (update.callback_query) {
+        const cb = update.callback_query;
+        const incomingChatId = cb.message?.chat?.id ? cb.message.chat.id.toString().trim() : '';
+
+        if (!authorizedChatId || incomingChatId !== authorizedChatId) {
+          console.warn(`[TelegramBot] Access denied for callback query chat_id: "${incomingChatId}" (Authorized: "${authorizedChatId}")`);
+          return;
+        }
+
+        await TelegramBotService.answerCallbackQuery(cb.id);
+        await TelegramBotService.processCallbackQuery(incomingChatId, cb.data);
+        return;
+      }
+
       const message = update.message || update.edited_message;
       if (!message || !message.text || !message.chat) return;
 
       const incomingChatId = message.chat.id ? message.chat.id.toString().trim() : '';
       const rawText = message.text.trim();
 
-      // Check authorized chat ID
-      const settings = await ServerDB.getSettings();
-      const authorizedChatId = settings.telegramChatId ? settings.telegramChatId.toString().trim() : '';
-
-      // CRITICAL REQUIREMENT:
       // Compare the incoming chat.id against the chatId already stored in settings.
-      // If it doesn't match, ignore the message entirely (no reply, no action).
       if (!authorizedChatId || incomingChatId !== authorizedChatId) {
         console.warn(`[TelegramBot] Access denied for incoming chat_id: "${incomingChatId}" (Authorized: "${authorizedChatId}")`);
         return;
@@ -114,6 +175,15 @@ export class TelegramBotService {
     const args = tokens.slice(1);
 
     try {
+      const settings = await ServerDB.getSettings();
+      if (!settings.nextDnsApiKey && command !== '/help' && command !== '/start') {
+        await this.sendReply(
+          chatId,
+          `⚠️ <b>NextDNS Account Not Connected</b>\n\nNextDNS API Key is not configured. Please open Settings in the web dashboard and enter your NextDNS API Key to use bot controls.`
+        );
+        return;
+      }
+
       switch (command) {
         case '/start':
         case '/help':
@@ -124,6 +194,9 @@ export class TelegramBotService {
           break;
         case '/block':
           await this.handleBlock(chatId, args);
+          break;
+        case '/unblock':
+          await this.handleUnblock(chatId, args);
           break;
         case '/watch':
           await this.handleWatch(chatId, args);
@@ -146,12 +219,73 @@ export class TelegramBotService {
     }
   }
 
+  // Helper to match user input string to profile
+  private static async findProfileMatch(input: string): Promise<{ userKey: string; profileName: string; isGeneral: boolean } | null> {
+    const clean = input.trim().toLowerCase();
+    if (clean === 'general' || clean === 'shared' || clean === 'all') {
+      return { userKey: 'general', profileName: 'Shared General', isGeneral: true };
+    }
+
+    const profiles = await NextDNSService.getDynamicProfiles();
+
+    // 1. Exact match on ID or Key
+    for (const p of profiles) {
+      const key = getProfileKey(p);
+      if (p.id.toLowerCase() === clean || key.toLowerCase() === clean) {
+        return { userKey: key, profileName: p.name, isGeneral: false };
+      }
+    }
+
+    // 2. Exact match on Name
+    for (const p of profiles) {
+      if (p.name.toLowerCase() === clean) {
+        const key = getProfileKey(p);
+        return { userKey: key, profileName: p.name, isGeneral: false };
+      }
+    }
+
+    // 3. Partial match on Name or Key
+    for (const p of profiles) {
+      const key = getProfileKey(p);
+      if (p.name.toLowerCase().includes(clean) || clean.includes(p.name.toLowerCase()) || key.toLowerCase().includes(clean)) {
+        return { userKey: key, profileName: p.name, isGeneral: false };
+      }
+    }
+
+    return null;
+  }
+
+  // Callback query handler
+  static async processCallbackQuery(chatId: string, data: string) {
+    if (!data) return;
+
+    if (data.startsWith('block_p:')) {
+      // Format: block_p:userKey:domain
+      const parts = data.split(':');
+      if (parts.length >= 3) {
+        const uKey = parts[1];
+        const domain = parts.slice(2).join(':');
+        const profiles = await NextDNSService.getDynamicProfiles();
+        const pMatch = profiles.find(p => getProfileKey(p) === uKey);
+        const profileName = pMatch ? pMatch.name : uKey.toUpperCase();
+        await this.blockDomainInProfile(chatId, domain, uKey, profileName);
+      }
+    } else if (data.startsWith('block_hint:')) {
+      const uKey = data.replace('block_hint:', '');
+      const profiles = await NextDNSService.getDynamicProfiles();
+      const pMatch = profiles.find(p => getProfileKey(p) === uKey);
+      const pName = pMatch ? pMatch.name : uKey.toUpperCase();
+      await this.sendReply(chatId, `💡 <b>To block for ${pName}:</b>\nSend <code>/block &lt;domain&gt; ${pName}</code>\nExample: <code>/block game.com ${pName}</code>`);
+    }
+  }
+
   // /help or /start
   private static async handleHelp(chatId: string) {
     const helpMsg = `🤖 <b>nDNS Automations — Telegram Bot Console</b>\n\n` +
       `Here are your available mobile commands:\n` +
       `• <code>/status</code> — Quick traffic & block summary across all profiles\n` +
-      `• <code>/block &lt;domain&gt;</code> — Add domain to Shared Denylist & sync all profiles\n` +
+      `• <code>/block &lt;domain&gt; [profile]</code> — Add domain to Shared General or specific profile (e.g. <code>/block freefire.com AMMU</code>)\n` +
+      `• <code>/unblock &lt;domain&gt; [profile]</code> — Unblock domain (within 24h) from Shared General or specific profile\n` +
       `• <code>/watch &lt;domain&gt;</code> — Add domain to Watchlist Alerts\n` +
       `• <code>/unwatch &lt;domain&gt;</code> — Remove domain from Watchlist\n` +
       `• <code>/report</code> — Generate on-demand Security & Top Domains Report\n` +
@@ -189,10 +323,31 @@ export class TelegramBotService {
     await this.sendReply(chatId, statusMsg);
   }
 
-  // /block <domain> handler
+  // /block <domain> [profile] handler
   private static async handleBlock(chatId: string, args: string[]) {
     if (args.length === 0 || !args[0].trim()) {
-      await this.sendReply(chatId, `⚠️ <b>Usage:</b> <code>/block &lt;domain&gt;</code>\nExample: <code>/block ads.example.com</code>`);
+      const profiles = await NextDNSService.getDynamicProfiles();
+      const inlineKeyboard: any[] = [];
+      let row: any[] = [];
+      for (const p of profiles) {
+        const uKey = getProfileKey(p);
+        row.push({ text: p.name, callback_data: `block_hint:${uKey}` });
+        if (row.length === 2) {
+          inlineKeyboard.push(row);
+          row = [];
+        }
+      }
+      if (row.length > 0) inlineKeyboard.push(row);
+
+      await this.sendReply(
+        chatId,
+        `⚠️ <b>Usage:</b> <code>/block &lt;domain&gt; [profile]</code>\n\n` +
+        `<b>Examples:</b>\n` +
+        `• <code>/block ads.example.com</code> (Shared General — all profiles)\n` +
+        `• <code>/block freefire.com AMMU</code> (AMMU profile only)\n\n` +
+        `<i>Tap a profile below for syntax guide:</i>`,
+        { inline_keyboard: inlineKeyboard }
+      );
       return;
     }
 
@@ -204,42 +359,318 @@ export class TelegramBotService {
       .replace(/^www\./, '')
       .trim();
 
-    // Basic domain validation regex
     const domainRegex = /^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$/i;
     if (!domainRegex.test(cleanDomain)) {
       await this.sendReply(chatId, `⚠️ <b>Invalid domain format:</b> <code>${rawDomain}</code>. Please provide a valid domain name (e.g. <code>example.com</code>).`);
       return;
     }
 
-    const blocklists = await ServerDB.getBlocklists();
+    const profileArg = args.length > 1 ? args.slice(1).join(' ').trim() : null;
+
+    if (profileArg) {
+      const match = await this.findProfileMatch(profileArg);
+      if (!match) {
+        const profiles = await NextDNSService.getDynamicProfiles();
+        const available = ['Shared General', ...profiles.map(p => p.name)].join(', ');
+        await this.sendReply(chatId, `⚠️ <b>Profile Not Found:</b> <code>${profileArg}</code>\n\nAvailable profiles: <code>${available}</code>`);
+        return;
+      }
+
+      if (match.isGeneral) {
+        await this.blockDomainInGeneral(chatId, cleanDomain, false);
+      } else {
+        await this.blockDomainInProfile(chatId, cleanDomain, match.userKey, match.profileName);
+      }
+    } else {
+      // Default to Shared General + attach inline keyboard to also add to specific profile
+      await this.blockDomainInGeneral(chatId, cleanDomain, true);
+    }
+  }
+
+  // Add domain to Shared General
+  private static async blockDomainInGeneral(chatId: string, cleanDomain: string, showProfileButtons: boolean = false) {
+    const oldBlocklists = await ServerDB.getBlocklists();
+    const blocklists = JSON.parse(JSON.stringify(oldBlocklists));
     const getDomainStr = (d: any) => (typeof d === 'string' ? d : d?.domain || '').toLowerCase().trim();
-    const isAlreadyBlocked = blocklists.general.some(d => getDomainStr(d) === cleanDomain);
+    const isAlreadyBlocked = (blocklists.general || []).some(d => getDomainStr(d) === cleanDomain);
+
+    let keyboard: any = null;
+    if (showProfileButtons) {
+      const profiles = await NextDNSService.getDynamicProfiles();
+      const rows: any[] = [];
+      let currentRow: any[] = [];
+      for (const p of profiles) {
+        const uKey = getProfileKey(p);
+        currentRow.push({
+          text: `+ ${p.name}`,
+          callback_data: `block_p:${uKey}:${cleanDomain}`
+        });
+        if (currentRow.length === 2) {
+          rows.push(currentRow);
+          currentRow = [];
+        }
+      }
+      if (currentRow.length > 0) rows.push(currentRow);
+      if (rows.length > 0) {
+        keyboard = { inline_keyboard: rows };
+      }
+    }
 
     if (isAlreadyBlocked) {
-      await this.sendReply(chatId, `ℹ️ <b>Domain Already Blocked:</b> <code>${cleanDomain}</code> is already in your Shared Denylist.`);
+      await this.sendReply(
+        chatId,
+        `ℹ️ <b>Domain Already Blocked:</b> <code>${cleanDomain}</code> is already in <b>Shared General (all profiles)</b>.` +
+        (showProfileButtons ? `\n\n<i>Also scope to a specific profile:</i>` : ''),
+        keyboard
+      );
       return;
     }
 
-    // Add to general denylist
-    blocklists.general.push({ domain: cleanDomain, alertEnabled: false });
-    // Sort
+    blocklists.general.push(createOrPreserveDenylistItem(cleanDomain, oldBlocklists, { alertEnabled: false, updatedBy: 'app' }));
     blocklists.general.sort((a, b) => getDomainStr(a).localeCompare(getDomainStr(b)));
     await ServerDB.saveBlocklists(blocklists);
+    await NextDNSService.notifyNewDenylistAdditions(oldBlocklists, blocklists, '/block command');
 
-    // Sync to NextDNS API
     const syncRes = await NextDNSService.syncAllProfiles();
+    const extraMsg = showProfileButtons ? `\n\n<i>Also scope to a specific profile:</i>` : '';
 
     if (syncRes.success) {
       await this.sendReply(
         chatId, 
         `✅ <b>Domain Blocked & Synced!</b>\n\n` +
-        `Domain <code>${cleanDomain}</code> added to Shared Denylist and synchronized across all NextDNS profiles immediately.`
+        `Domain <code>${cleanDomain}</code> added to <b>Shared General (all profiles)</b> and synchronized across all NextDNS profiles immediately.` +
+        extraMsg,
+        keyboard
       );
     } else {
       await this.sendReply(
         chatId,
-        `⚠️ <b>Domain Saved Locally:</b> <code>${cleanDomain}</code> added to Shared Denylist, but NextDNS API sync returned a warning/error. It will sync on the next cycle.`
+        `⚠️ <b>Domain Saved Locally:</b> <code>${cleanDomain}</code> added to <b>Shared General (all profiles)</b>, but NextDNS API sync returned a warning. It will sync on the next cycle.` +
+        extraMsg,
+        keyboard
       );
+    }
+  }
+
+  // Add domain to specific profile's userKey
+  private static async blockDomainInProfile(chatId: string, cleanDomain: string, userKey: string, profileName: string) {
+    const oldBlocklists = await ServerDB.getBlocklists();
+    const blocklists = JSON.parse(JSON.stringify(oldBlocklists));
+    if (!blocklists.perUser) blocklists.perUser = {};
+    if (!blocklists.perUser[userKey]) blocklists.perUser[userKey] = [];
+
+    const getDomainStr = (d: any) => (typeof d === 'string' ? d : d?.domain || '').toLowerCase().trim();
+    const isAlreadyBlocked = blocklists.perUser[userKey].some(d => getDomainStr(d) === cleanDomain);
+
+    if (isAlreadyBlocked) {
+      await this.sendReply(chatId, `ℹ️ <b>Domain Already Blocked:</b> <code>${cleanDomain}</code> is already in the denylist for <b>Profile ${profileName}</b>.`);
+      return;
+    }
+
+    blocklists.perUser[userKey].push(createOrPreserveDenylistItem(cleanDomain, oldBlocklists, { alertEnabled: false, updatedBy: 'app' }));
+    blocklists.perUser[userKey].sort((a, b) => getDomainStr(a).localeCompare(getDomainStr(b)));
+    await ServerDB.saveBlocklists(blocklists);
+    await NextDNSService.notifyNewDenylistAdditions(oldBlocklists, blocklists, `/block command (${profileName})`);
+
+    const syncRes = await NextDNSService.syncAllProfiles();
+
+    if (syncRes.success) {
+      await this.sendReply(
+        chatId,
+        `✅ <b>Domain Blocked & Synced!</b>\n\n` +
+        `Domain <code>${cleanDomain}</code> added to <b>Profile ${profileName}</b> and synchronized to NextDNS immediately.`
+      );
+    } else {
+      await this.sendReply(
+        chatId,
+        `⚠️ <b>Domain Saved Locally:</b> <code>${cleanDomain}</code> added to <b>Profile ${profileName}</b>, but NextDNS API sync returned a warning.`
+      );
+    }
+  }
+
+  // /unblock <domain> [profile] handler
+  private static async handleUnblock(chatId: string, args: string[]) {
+    if (args.length === 0 || !args[0].trim()) {
+      await this.sendReply(
+        chatId,
+        `⚠️ <b>Usage:</b> <code>/unblock &lt;domain&gt; [profile]</code>\n\n` +
+        `<b>Examples:</b>\n` +
+        `• <code>/unblock ads.example.com</code> (Shared General)\n` +
+        `• <code>/unblock freefire.com AMMU</code> (AMMU profile only)`
+      );
+      return;
+    }
+
+    const rawDomain = args[0].trim();
+    const cleanDomain = rawDomain
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '')
+      .replace(/^www\./, '')
+      .trim();
+
+    const domainRegex = /^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$/i;
+    if (!domainRegex.test(cleanDomain)) {
+      await this.sendReply(chatId, `⚠️ <b>Invalid domain format:</b> <code>${rawDomain}</code>. Please provide a valid domain name.`);
+      return;
+    }
+
+    const profileArg = args.length > 1 ? args.slice(1).join(' ').trim() : null;
+    const blocklists = await ServerDB.getBlocklists();
+    const getDomainStr = (d: any) => (typeof d === 'string' ? d : d?.domain || '').toLowerCase().trim();
+
+    const isLocked = (item: any): boolean => {
+      if (!item) return true;
+      const addedAt = typeof item === 'string' ? null : item.addedAt;
+      if (!addedAt) return true;
+      const addedMs = new Date(addedAt).getTime();
+      if (isNaN(addedMs)) return true;
+      return Date.now() - addedMs > 24 * 60 * 60 * 1000;
+    };
+
+    const formatAddedAt = (item: any): string => {
+      const addedAt = typeof item === 'string' ? null : item?.addedAt;
+      if (!addedAt) return 'pre-existing (no timestamp)';
+      const d = new Date(addedAt);
+      if (isNaN(d.getTime())) return 'pre-existing (no timestamp)';
+      const utc6 = new Date(d.getTime() + 6 * 60 * 60 * 1000);
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      return `${utc6.getUTCFullYear()}-${pad(utc6.getUTCMonth() + 1)}-${pad(utc6.getUTCDate())} ${pad(utc6.getUTCHours())}:${pad(utc6.getUTCMinutes())}:${pad(utc6.getUTCSeconds())} (UTC+06:00)`;
+    };
+
+    if (profileArg) {
+      // Specific profile requested
+      const match = await this.findProfileMatch(profileArg);
+      if (!match) {
+        const profiles = await NextDNSService.getDynamicProfiles();
+        const available = ['Shared General', ...profiles.map(p => p.name)].join(', ');
+        await this.sendReply(chatId, `⚠️ <b>Profile Not Found:</b> <code>${profileArg}</code>\n\nAvailable profiles: <code>${available}</code>`);
+        return;
+      }
+
+      if (match.isGeneral) {
+        const genIndex = (blocklists.general || []).findIndex(item => getDomainStr(item) === cleanDomain);
+        if (genIndex === -1) {
+          await this.sendReply(chatId, `⚠️ <b>Not Found in Shared General:</b> Domain <code>${cleanDomain}</code> is not present on <b>Shared General (all profiles)</b>.`);
+          return;
+        }
+        const item = blocklists.general[genIndex];
+        if (isLocked(item)) {
+          await this.sendReply(
+            chatId,
+            `🔒 <b>Domain Removal Locked:</b>\n\n` +
+            `Domain <code>${cleanDomain}</code> in <b>Shared General (all profiles)</b> is locked because its 24-hour grace period has passed.\n\n` +
+            `<b>Added At:</b> ${formatAddedAt(item)}\n` +
+            `Locked domains can no longer be unblocked via nDNS Automations.`
+          );
+          return;
+        }
+        blocklists.general.splice(genIndex, 1);
+        await ServerDB.saveBlocklists(blocklists);
+        const syncRes = await NextDNSService.syncAllProfiles();
+        if (syncRes.success) {
+          await this.sendReply(chatId, `🔓 <b>Domain Unblocked & Synced!</b>\n\nDomain <code>${cleanDomain}</code> removed from <b>Shared General (all profiles)</b> and unblocked across NextDNS profiles immediately.`);
+        } else {
+          await this.sendReply(chatId, `⚠️ <b>Domain Removed Locally:</b> <code>${cleanDomain}</code> removed from <b>Shared General (all profiles)</b>, but NextDNS API sync returned a warning.`);
+        }
+      } else {
+        const userList = (blocklists.perUser && blocklists.perUser[match.userKey]) || [];
+        const uIndex = userList.findIndex(item => getDomainStr(item) === cleanDomain);
+        if (uIndex === -1) {
+          await this.sendReply(chatId, `⚠️ <b>Not Found in Profile ${match.profileName}:</b> Domain <code>${cleanDomain}</code> is not present on <b>Profile ${match.profileName}</b>'s denylist.`);
+          return;
+        }
+        const item = userList[uIndex];
+        if (isLocked(item)) {
+          await this.sendReply(
+            chatId,
+            `🔒 <b>Domain Removal Locked:</b>\n\n` +
+            `Domain <code>${cleanDomain}</code> in <b>Profile ${match.profileName}</b> is locked because its 24-hour grace period has passed.\n\n` +
+            `<b>Added At:</b> ${formatAddedAt(item)}\n` +
+            `Locked domains can no longer be unblocked via nDNS Automations.`
+          );
+          return;
+        }
+        userList.splice(uIndex, 1);
+        await ServerDB.saveBlocklists(blocklists);
+        const syncRes = await NextDNSService.syncAllProfiles();
+        if (syncRes.success) {
+          await this.sendReply(chatId, `🔓 <b>Domain Unblocked & Synced!</b>\n\nDomain <code>${cleanDomain}</code> removed from <b>Profile ${match.profileName}</b> and unblocked on NextDNS immediately.`);
+        } else {
+          await this.sendReply(chatId, `⚠️ <b>Domain Removed Locally:</b> <code>${cleanDomain}</code> removed from <b>Profile ${match.profileName}</b>, but NextDNS API sync returned a warning.`);
+        }
+      }
+    } else {
+      // Default /unblock <domain> (no profile arg): try Shared General first, then fall back to perUser
+      const genIndex = (blocklists.general || []).findIndex(item => getDomainStr(item) === cleanDomain);
+      if (genIndex !== -1) {
+        const item = blocklists.general[genIndex];
+        if (isLocked(item)) {
+          await this.sendReply(
+            chatId,
+            `🔒 <b>Domain Removal Locked:</b>\n\n` +
+            `Domain <code>${cleanDomain}</code> in <b>Shared General (all profiles)</b> is locked because its 24-hour grace period has passed.\n\n` +
+            `<b>Added At:</b> ${formatAddedAt(item)}\n` +
+            `Locked domains can no longer be unblocked via nDNS Automations.`
+          );
+          return;
+        }
+        blocklists.general.splice(genIndex, 1);
+        await ServerDB.saveBlocklists(blocklists);
+        const syncRes = await NextDNSService.syncAllProfiles();
+        if (syncRes.success) {
+          await this.sendReply(chatId, `🔓 <b>Domain Unblocked & Synced!</b>\n\nDomain <code>${cleanDomain}</code> removed from <b>Shared General (all profiles)</b> and unblocked across NextDNS profiles immediately.`);
+        } else {
+          await this.sendReply(chatId, `⚠️ <b>Domain Removed Locally:</b> <code>${cleanDomain}</code> removed from <b>Shared General (all profiles)</b>, but NextDNS API sync returned a warning.`);
+        }
+        return;
+      }
+
+      // Search perUser
+      let foundEntry: { userKey: string; profileName: string; index: number; item: any } | null = null;
+      const profiles = await NextDNSService.getDynamicProfiles();
+
+      if (blocklists.perUser) {
+        for (const uKey of Object.keys(blocklists.perUser)) {
+          const uList = blocklists.perUser[uKey] || [];
+          const idx = uList.findIndex(item => getDomainStr(item) === cleanDomain);
+          if (idx !== -1) {
+            const pMatch = profiles.find(p => getProfileKey(p) === uKey);
+            foundEntry = {
+              userKey: uKey,
+              profileName: pMatch ? pMatch.name : uKey.toUpperCase(),
+              index: idx,
+              item: uList[idx]
+            };
+            break;
+          }
+        }
+      }
+
+      if (!foundEntry) {
+        await this.sendReply(chatId, `⚠️ <b>Not Found in Denylist:</b> Domain <code>${cleanDomain}</code> is not currently present on any Denylist.`);
+        return;
+      }
+
+      if (isLocked(foundEntry.item)) {
+        await this.sendReply(
+          chatId,
+          `🔒 <b>Domain Removal Locked:</b>\n\n` +
+          `Domain <code>${cleanDomain}</code> in <b>Profile ${foundEntry.profileName}</b> is locked because its 24-hour grace period has passed.\n\n` +
+          `<b>Added At:</b> ${formatAddedAt(foundEntry.item)}\n` +
+          `Locked domains can no longer be unblocked via nDNS Automations.`
+        );
+        return;
+      }
+
+      blocklists.perUser[foundEntry.userKey].splice(foundEntry.index, 1);
+      await ServerDB.saveBlocklists(blocklists);
+      const syncRes = await NextDNSService.syncAllProfiles();
+      if (syncRes.success) {
+        await this.sendReply(chatId, `🔓 <b>Domain Unblocked & Synced!</b>\n\nDomain <code>${cleanDomain}</code> removed from <b>Profile ${foundEntry.profileName}</b> and unblocked on NextDNS immediately.`);
+      } else {
+        await this.sendReply(chatId, `⚠️ <b>Domain Removed Locally:</b> <code>${cleanDomain}</code> removed from <b>Profile ${foundEntry.profileName}</b>, but NextDNS API sync returned a warning.`);
+      }
     }
   }
 

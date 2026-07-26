@@ -1,7 +1,15 @@
-import { ServerDB } from './server-db';
-import { LogEntry, AlertLogEntry, NextDNSProfile } from './src/types';
+import { ServerDB, createOrPreserveDenylistItem } from './server-db';
+import { LogEntry, AlertLogEntry, NextDNSProfile, DenylistItem } from './src/types';
 
 // Let's use global fetch (native in Node 18+)
+
+export function getProfileKey(profile: { id?: string; name?: string }): string {
+  if (!profile) return 'others';
+  const name = profile.name || '';
+  if (!name) return profile.id || 'others';
+  const clean = name.toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
+  return clean || profile.id || 'others';
+}
 
 export class NextDNSService {
   private static activeSSEListeners: { [profileId: string]: any } = {};
@@ -16,41 +24,8 @@ export class NextDNSService {
     const logs = await ServerDB.getLogs();
 
     if (!settings.nextDnsApiKey) {
-      // Demo Mode: Simulate realistic changes (random fluctuations over time)
-      return localProfiles.map(profile => {
-        // Vary the count slightly so it doesn't look static
-        const hourFactor = new Date().getHours() + new Date().getMinutes() / 60;
-        const seed = profile.id.charCodeAt(0) + (profile.id.charCodeAt(1) || 0);
-        const cycle = Math.sin(hourFactor / 4 + seed) * 0.12; // +/- 12% fluctuation
-        
-        const queries = Math.round(profile.queriesLast7Days * (1 + cycle));
-        const blocks = Math.round(profile.blocksLast7Days * (1 + cycle * 0.8));
-
-        // Dynamically calculate active rules count
-        let userKey = 'others';
-        const nameLower = profile.name.toLowerCase();
-        if (nameLower.includes('router')) userKey = 'router';
-        else if (nameLower.includes('mine')) userKey = 'mine';
-        else if (nameLower.includes('ammu')) userKey = 'ammu';
-        else if (nameLower.includes('abbu')) userKey = 'abbu';
-        else if (nameLower.includes('others')) userKey = 'others';
-
-        const perUserCount = blocklists.perUser[userKey]?.length || 0;
-        const activeRulesCount = blocklists.general.length + perUserCount;
-
-        // Count unique devices from actual logs for this profile
-        const profileLogs = logs.filter(l => l.profileName?.toLowerCase() === profile.name.toLowerCase());
-        const uniqueDevices = new Set(profileLogs.map(l => l.deviceName));
-        const deviceCount = uniqueDevices.size || profile.deviceCount || 3;
-
-        return {
-          ...profile,
-          queriesLast7Days: queries,
-          blocksLast7Days: blocks,
-          activeRulesCount,
-          deviceCount
-        };
-      });
+      // Disconnected / Key Missing Mode: Do NOT return simulated mock profiles
+      return [];
     }
 
     try {
@@ -93,14 +68,7 @@ export class NextDNSService {
         }
 
         // Dynamically calculate active rules count based on blocklists.json
-        let userKey = 'others';
-        const nameLower = apiP.name.toLowerCase();
-        if (nameLower.includes('router')) userKey = 'router';
-        else if (nameLower.includes('mine')) userKey = 'mine';
-        else if (nameLower.includes('ammu')) userKey = 'ammu';
-        else if (nameLower.includes('abbu')) userKey = 'abbu';
-        else if (nameLower.includes('others')) userKey = 'others';
-
+        const userKey = getProfileKey({ id: apiP.id, name: apiP.name });
         const perUserCount = blocklists.perUser[userKey]?.length || 0;
         const activeRulesCount = blocklists.general.length + perUserCount;
 
@@ -137,7 +105,7 @@ export class NextDNSService {
         });
       }
 
-      // Save to server database so the cache is stored
+      // Save reconciled profiles to server database
       await ServerDB.saveProfiles(mergedProfiles);
       return mergedProfiles;
     } catch (e) {
@@ -184,8 +152,8 @@ export class NextDNSService {
   static async syncProfile(profileId: string, domains: string[]): Promise<boolean> {
     const settings = await ServerDB.getSettings();
     if (!settings.nextDnsApiKey) {
-      console.log(`[Sync Mock] Simulating sync of ${domains.length} domains to profile ${profileId}`);
-      return true;
+      console.warn(`[NextDNS Sync] Cannot sync profile ${profileId}: NextDNS API Key is missing in Settings.`);
+      return false;
     }
 
     try {
@@ -214,26 +182,35 @@ export class NextDNSService {
 
   // Trigger global synchronization of all profiles
   static async syncAllProfiles(): Promise<{ success: boolean; syncedCount: number; message: string }> {
+    const settings = await ServerDB.getSettings();
+    if (!settings.nextDnsApiKey) {
+      return {
+        success: false,
+        syncedCount: 0,
+        message: 'NextDNS API Key is missing. Please configure your NextDNS API Key in Settings.'
+      };
+    }
+
     const blocklists = await ServerDB.getBlocklists();
-    const profiles = await ServerDB.getProfiles();
+    const profiles = await this.getDynamicProfiles();
+    if (!profiles || profiles.length === 0) {
+      return {
+        success: false,
+        syncedCount: 0,
+        message: 'No NextDNS profiles found. Please verify your NextDNS API Key in Settings.'
+      };
+    }
+
     let syncedCount = 0;
     let failedProfiles: string[] = [];
 
-    const generalList = blocklists.general;
-
     for (const profile of profiles) {
-      // Find user-specific extras. Map names to keys dynamically
-      let userKey = 'others';
-      const nameLower = profile.name.toLowerCase();
-      if (nameLower.includes('router')) userKey = 'router';
-      else if (nameLower.includes('mine')) userKey = 'mine';
-      else if (nameLower.includes('ammu')) userKey = 'ammu';
-      else if (nameLower.includes('abbu')) userKey = 'abbu';
-      else if (nameLower.includes('others')) userKey = 'others';
+      const userKey = getProfileKey(profile);
 
-      const getDomainStr = (entry: any): string => (typeof entry === 'string' ? entry : entry?.domain || '');
-      const generalDomains = blocklists.general.map(getDomainStr).filter(Boolean);
-      const perUserDomains = (blocklists.perUser[userKey] || []).map(getDomainStr).filter(Boolean);
+      const getDomainStr = (entry: any): string => (typeof entry === 'string' ? entry : entry?.domain || '').toLowerCase().trim();
+      const generalDomains = (blocklists.general || []).map(getDomainStr).filter(Boolean);
+      const perUserDomains = ((blocklists.perUser && blocklists.perUser[userKey]) || []).map(getDomainStr).filter(Boolean);
+      
       const mergedList = Array.from(new Set([...generalDomains, ...perUserDomains]));
 
       const ok = await this.syncProfile(profile.id, mergedList);
@@ -244,16 +221,19 @@ export class NextDNSService {
       }
     }
 
-    const settings = await ServerDB.getSettings();
-    const prefix = settings.nextDnsApiKey ? 'Real NextDNS' : 'Simulated';
-
     if (failedProfiles.length === 0) {
       return {
         success: true,
         syncedCount,
-        message: `Successfully synchronized all ${syncedCount} profiles in ${prefix} mode!`
+        message: `Successfully synchronized all ${syncedCount} NextDNS profiles!`
       };
     } else {
+      const failMsg = `⚠️ <b>NextDNS Sync Warning</b>\n\n` +
+        `Synced <b>${syncedCount}</b> profile(s).\n` +
+        `Failed profiles: <code>${failedProfiles.join(', ')}</code>\n` +
+        `Please check NextDNS API Key permissions or profile configurations.`;
+      await this.sendTelegramAlert(failMsg);
+
       return {
         success: false,
         syncedCount,
@@ -342,15 +322,24 @@ export class NextDNSService {
       const getUpdatedBy = (e: any): 'native' | 'app' => (typeof e === 'object' && e?.updatedBy ? e.updatedBy : 'app');
 
       // Map existing known domains to their current details
-      const existingMetaMap = new Map<string, { alertEnabled: boolean; addedAt: string; updatedBy: 'native' | 'app' }>();
+      const existingMetaMap = new Map<string, { alertEnabled: boolean; addedAt?: string; updatedBy: 'native' | 'app' }>();
       (currentBlocklists.general || []).forEach(e => {
         const d = getDomainStr(e);
-        if (d) existingMetaMap.set(d, { alertEnabled: getAlertEnabled(e), addedAt: getAddedAt(e), updatedBy: getUpdatedBy(e) });
+        if (d) {
+          const addedAtVal = typeof e === 'object' && e?.addedAt ? e.addedAt : undefined;
+          existingMetaMap.set(d, { alertEnabled: getAlertEnabled(e), addedAt: addedAtVal, updatedBy: getUpdatedBy(e) });
+        }
       });
       Object.values(currentBlocklists.perUser || {}).forEach(list => {
         (list || []).forEach(e => {
           const d = getDomainStr(e);
-          if (d) existingMetaMap.set(d, { alertEnabled: getAlertEnabled(e), addedAt: getAddedAt(e), updatedBy: getUpdatedBy(e) });
+          if (d) {
+            const addedAtVal = typeof e === 'object' && e?.addedAt ? e.addedAt : undefined;
+            const prev = existingMetaMap.get(d);
+            if (!prev || (!prev.addedAt && addedAtVal)) {
+              existingMetaMap.set(d, { alertEnabled: getAlertEnabled(e), addedAt: addedAtVal, updatedBy: getUpdatedBy(e) });
+            }
+          }
         });
       });
 
@@ -362,13 +351,7 @@ export class NextDNSService {
       let hasPendingAppPushes = false;
 
       for (const profile of profiles) {
-        let userKey = 'others';
-        const nameLower = profile.name.toLowerCase();
-        if (nameLower.includes('router')) userKey = 'router';
-        else if (nameLower.includes('mine')) userKey = 'mine';
-        else if (nameLower.includes('ammu')) userKey = 'ammu';
-        else if (nameLower.includes('abbu')) userKey = 'abbu';
-        else if (nameLower.includes('others')) userKey = 'others';
+        const userKey = getProfileKey(profile);
 
         const remoteDomains = await this.fetchDenylistFromAPI(profile.id);
         const lowerRemote = remoteDomains.map(d => d.toLowerCase().trim()).filter(Boolean);
@@ -398,7 +381,7 @@ export class NextDNSService {
           }
         }
 
-        // Check native changes
+        // Check native changes (only assign nowIso to TRULY new native additions)
         for (const rDomain of lowerRemote) {
           if (!existingMetaMap.has(rDomain)) {
             nativeAdditionsCount++;
@@ -427,56 +410,73 @@ export class NextDNSService {
       }
 
       const userKeys = Object.keys(remoteMap);
-      const existingGeneralDomains = (currentBlocklists.general || []).map(getDomainStr).filter(Boolean);
 
-      // Domains in general that are present across all remote profile lists remain in general
-      const newGeneralDomains: string[] = [];
-      if (userKeys.length > 0) {
-        existingGeneralDomains.forEach(d => {
-          const presentInAll = userKeys.every(k => remoteMap[k].includes(d));
-          if (presentInAll) {
-            newGeneralDomains.push(d);
-          }
-        });
-      }
+      // NON-DESTRUCTIVE GENERAL ENFORCEMENT:
+      // Keep ALL existing general entries. Never wipe or drop general entries during sync!
+      const generalMap = new Map<string, DenylistItem>();
+      
+      (currentBlocklists.general || []).forEach(e => {
+        const d = getDomainStr(e);
+        if (d) {
+          const item = createOrPreserveDenylistItem(d, currentBlocklists, {
+            alertEnabled: getAlertEnabled(e),
+            updatedBy: getUpdatedBy(e)
+          });
+          generalMap.set(d, item);
+        }
+      });
 
-      // Add newly pulled native domains if present across all remote profiles
+      // Add new native domain to general ONLY if present across ALL remote profiles and not in perUser
       for (const [d, meta] of existingMetaMap.entries()) {
         if (meta.updatedBy === 'native' && userKeys.length > 0 && userKeys.every(k => remoteMap[k]?.includes(d))) {
-          if (!newGeneralDomains.includes(d)) {
-            newGeneralDomains.push(d);
+          if (!generalMap.has(d)) {
+            const item = createOrPreserveDenylistItem(d, currentBlocklists, {
+              alertEnabled: meta.alertEnabled ?? false,
+              updatedBy: 'native',
+              forcedAddedAt: meta.addedAt
+            });
+            generalMap.set(d, item);
           }
         }
       }
 
-      const generalSet = new Set(newGeneralDomains);
+      const generalSet = new Set(Array.from(generalMap.keys()));
+      const newGeneralEntries = Array.from(generalMap.values()).sort((a, b) => a.domain.localeCompare(b.domain));
 
-      const newGeneralEntries = newGeneralDomains.sort().map(d => {
-        const meta = existingMetaMap.get(d);
-        return {
-          domain: d,
-          alertEnabled: meta?.alertEnabled ?? false,
-          addedAt: meta?.addedAt || nowIso,
-          updatedBy: meta?.updatedBy || 'native'
-        };
-      });
+      // NON-DESTRUCTIVE PER-USER ENFORCEMENT:
+      const newPerUser: { [key: string]: DenylistItem[] } = {};
+      const activeUserKeys = Array.from(new Set([...profiles.map(getProfileKey), ...Object.keys(currentBlocklists.perUser || {})]));
 
-      const newPerUser: { [key: string]: any[] } = {};
-      const defaultUserKeys = ['router', 'mine', 'ammu', 'abbu', 'others'];
-      const allUserKeys = Array.from(new Set([...defaultUserKeys, ...userKeys]));
-
-      for (const key of allUserKeys) {
-        const remoteList = remoteMap[key] || [];
-        const userDomains = remoteList.filter(d => !generalSet.has(d)).sort();
-        newPerUser[key] = userDomains.map(d => {
-          const meta = existingMetaMap.get(d);
-          return {
-            domain: d,
-            alertEnabled: meta?.alertEnabled ?? false,
-            addedAt: meta?.addedAt || nowIso,
-            updatedBy: meta?.updatedBy || 'native'
-          };
+      for (const uKey of activeUserKeys) {
+        const userMap = new Map<string, DenylistItem>();
+        
+        // 1. Preserve existing perUser items for this profile
+        ((currentBlocklists.perUser && currentBlocklists.perUser[uKey]) || []).forEach(e => {
+          const d = getDomainStr(e);
+          if (d && !generalSet.has(d)) {
+            const item = createOrPreserveDenylistItem(d, currentBlocklists, {
+              alertEnabled: getAlertEnabled(e),
+              updatedBy: getUpdatedBy(e)
+            });
+            userMap.set(d, item);
+          }
         });
+
+        // 2. Add native remote additions for this profile that are not in general
+        const remoteList = remoteMap[uKey] || [];
+        remoteList.forEach(d => {
+          if (!generalSet.has(d) && !userMap.has(d)) {
+            const meta = existingMetaMap.get(d);
+            const item = createOrPreserveDenylistItem(d, currentBlocklists, {
+              alertEnabled: meta?.alertEnabled ?? false,
+              updatedBy: meta?.updatedBy || 'native',
+              forcedAddedAt: meta?.addedAt
+            });
+            userMap.set(d, item);
+          }
+        });
+
+        newPerUser[uKey] = Array.from(userMap.values()).sort((a, b) => a.domain.localeCompare(b.domain));
       }
 
       const updatedBlocklists = {
@@ -488,6 +488,7 @@ export class NextDNSService {
       };
 
       await ServerDB.saveBlocklists(updatedBlocklists);
+      await NextDNSService.notifyNewDenylistAdditions(currentBlocklists, updatedBlocklists, 'Native NextDNS Sync');
 
       // If app had pending local pushes, sync them to NextDNS profiles now
       if (hasPendingAppPushes) {
@@ -582,6 +583,77 @@ export class NextDNSService {
     } catch (error: any) {
       console.error('Error dispatching Telegram alert:', error);
       return false;
+    }
+  }
+
+  // Dispatch Telegram alert whenever a NEW domain is added to Denylist across any path
+  static async notifyNewDenylistAdditions(
+    oldBlocklists: any,
+    newBlocklists: any,
+    source: string
+  ): Promise<void> {
+    try {
+      const getDomainStr = (e: any) => (typeof e === 'string' ? e : e?.domain || '').toLowerCase().trim();
+
+      const getMap = (bl: any) => {
+        const map = new Map<string, { domain: string; scope: string }>();
+        if (bl && bl.general && Array.isArray(bl.general)) {
+          for (const item of bl.general) {
+            const d = getDomainStr(item);
+            if (d) map.set(`general:${d}`, { domain: typeof item === 'string' ? item : item.domain, scope: 'Shared General' });
+          }
+        }
+        if (bl && bl.perUser) {
+          for (const [userKey, list] of Object.entries(bl.perUser)) {
+            if (Array.isArray(list)) {
+              for (const item of list) {
+                const d = getDomainStr(item);
+                if (d) map.set(`${userKey}:${d}`, { domain: typeof item === 'string' ? item : item.domain, scope: `Profile (${userKey})` });
+              }
+            }
+          }
+        }
+        return map;
+      };
+
+      const oldMap = getMap(oldBlocklists);
+      const newMap = getMap(newBlocklists);
+
+      const additions: { domain: string; scope: string }[] = [];
+      for (const [key, val] of newMap.entries()) {
+        if (!oldMap.has(key)) {
+          additions.push(val);
+        }
+      }
+
+      if (additions.length === 0) return;
+
+      const now = new Date();
+      const utc6 = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const timeFormatted = `${utc6.getUTCFullYear()}-${pad(utc6.getUTCMonth() + 1)}-${pad(utc6.getUTCDate())} ${pad(utc6.getUTCHours())}:${pad(utc6.getUTCMinutes())}:${pad(utc6.getUTCSeconds())}`;
+
+      const displayAdditions = additions.slice(0, 10);
+      for (const add of displayAdditions) {
+        const msg = `➕ <b>New Domain Added to Denylist</b>\n\n` +
+          `<b>Profile/Scope:</b> ${add.scope}\n` +
+          `<b>Domain:</b> <code>${add.domain}</code>\n` +
+          `<b>Source:</b> ${source}\n` +
+          `<b>Time:</b> ${timeFormatted} (UTC+06:00)`;
+
+        await this.sendTelegramAlert(msg);
+      }
+
+      if (additions.length > 10) {
+        const summaryMsg = `➕ <b>Bulk Denylist Addition Summary</b>\n\n` +
+          `<b>Source:</b> ${source}\n` +
+          `<b>Total New Domains Added:</b> ${additions.length}\n` +
+          `<b>Time:</b> ${timeFormatted} (UTC+06:00)\n\n` +
+          `<i>${additions.length - 10} additional domains were also added to your denylists.</i>`;
+        await this.sendTelegramAlert(summaryMsg);
+      }
+    } catch (e) {
+      console.error('Error in notifyNewDenylistAdditions:', e);
     }
   }
 

@@ -1,0 +1,443 @@
+{
+  "general": [
+    {
+      "domain": "ads-server-xyz.com",
+      "alertEnabled": false,
+      "addedAt": "2026-07-26T02:30:08.990Z",
+      "updatedBy": "app"
+    },
+    {
+      "domain": "badwebsite.com",
+      "alertEnabled": false,
+      "addedAt": "2026-07-26T02:30:08.990Z",
+      "updatedBy": "app"
+    },
+    {
+      "domain": "coin-miner.ru",
+      "alertEnabled": false,
+      "addedAt": "2026-07-26T02:30:08.990Z",
+      "updatedBy": "app"
+    },
+    {
+      "domain": "doubleclick.net",
+      "alertEnabled": false,
+      "addedAt": "2026-07-26T02:30:08.990Z",
+      "updatedBy": "app"
+    },
+    {
+      "domain": "malware-distribution-node.info",
+      "alertEnabled": false,
+      "addedAt": "2026-07-26T02:30:08.990Z",
+      "updatedBy": "app"
+    },
+    {
+      "domain": "phishing-portal-scam.net",
+      "alertEnabled": false,
+      "addedAt": "2026-07-26T02:30:08.990Z",
+      "updatedBy": "app"
+    },
+    {
+      "domain": "pornhub.com",
+      "alertEnabled": false,
+      "addedAt": "2026-07-26T02:30:08.990Z",
+      "updatedBy": "app"
+    },
+    {
+      "domain": "trackers-r-us.org",
+      "alertEnabled": false,
+      "addedAt": "2026-07-26T02:30:08.990Z",
+      "updatedBy": "app"
+    }
+  ],
+  "perUser": {
+    "primary": [
+      {
+        "domain": "aov.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "codm.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "content.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "craffactory.us.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "creditappeal.ind.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "creditappeal.sea.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "deltaforce.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dts.freefireth.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ff.garena.co.id",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ff.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ff.garena.vn",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ffarena.championship.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ffesports.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ffguide.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ffsupport.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "freefire.net",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "freefireind.in",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "freefireindiamobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      },
+      {
+        "domain": "freefireth.unitywebviewactivity",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "gamesecurity.sea.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "gaming-portal-distraction.net",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      },
+      {
+        "domain": "garena.co.id",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "garena.in.th",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "garena.sg",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "garena.shop",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "garena.vn",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "garenanow.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "garenanow.grtc.dr.ff",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "hotro.ff.garena.vn",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "intl.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "my.games",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "rankguide.freefireindiamobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "reward.ff.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "roblox-unblocked.org",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      },
+      {
+        "domain": "sea.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "shop.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "support.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "tw.support.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      }
+    ],
+    "mine": [
+      {
+        "domain": "csoversea.stronghold.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "distraction-reddit.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      },
+      {
+        "domain": "hackernews-time-waster.org",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      }
+    ],
+    "ammu": [
+      {
+        "domain": "csoversea.stronghold.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dl.castle.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dl.dir.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "instagram.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      },
+      {
+        "domain": "tiktok.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      }
+    ],
+    "abbu": [
+      {
+        "domain": "csoversea.stronghold.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dl.castle.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dl.dir.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      },
+      {
+        "domain": "tiktok.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      }
+    ],
+    "others": [
+      {
+        "domain": "gaming-portal-distraction.net",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      },
+      {
+        "domain": "roblox-unblocked.org",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "app"
+      }
+    ],
+    "router": [
+      {
+        "domain": "aov.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      }
+    ]
+  },
+  "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+  "profileLastSyncedAt": {
+    "primary": "2026-07-26T05:43:32.995Z",
+    "mine": "2026-07-26T05:43:32.995Z",
+    "ammu": "2026-07-26T05:43:32.995Z",
+    "abbu": "2026-07-26T05:43:32.995Z",
+    "others": "2026-07-26T05:43:32.995Z",
+    "router": "2026-07-26T05:43:32.995Z"
+  },
+  "profileSyncStatus": {
+    "primary": {
+      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastChangedBy": "sync",
+      "lastChangeSummary": "In Sync with NextDNS Native Authority"
+    },
+    "mine": {
+      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastChangedBy": "sync",
+      "lastChangeSummary": "In Sync with NextDNS Native Authority"
+    },
+    "ammu": {
+      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastChangedBy": "sync",
+      "lastChangeSummary": "In Sync with NextDNS Native Authority"
+    },
+    "abbu": {
+      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastChangedBy": "sync",
+      "lastChangeSummary": "In Sync with NextDNS Native Authority"
+    },
+    "others": {
+      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastChangedBy": "sync",
+      "lastChangeSummary": "In Sync with NextDNS Native Authority"
+    },
+    "router": {
+      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastChangedBy": "sync",
+      "lastChangeSummary": "In Sync with NextDNS Native Authority"
+    }
+  }
+}

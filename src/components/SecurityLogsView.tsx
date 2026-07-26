@@ -12,9 +12,10 @@ interface SecurityLogsViewProps {
   onRefresh: () => Promise<void>;
   refreshing: boolean;
   loading?: boolean;
+  hasApiKey?: boolean;
 }
 
-export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh, refreshing, loading = false }: SecurityLogsViewProps) {
+export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh, refreshing, loading = false, hasApiKey = true }: SecurityLogsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'dns' | 'dispatch'>('dns');
 
   return (
@@ -83,6 +84,12 @@ export default function SecurityLogsView({ logs, alerts, onClearLogs, onRefresh,
           <div className="bg-slate-950/80 border border-slate-900 rounded-xl overflow-hidden shadow-inner">
             {loading ? (
               <Skeleton variant="table-row" count={8} />
+            ) : !hasApiKey ? (
+              <div className="p-12 text-center space-y-2">
+                <Terminal className="mx-auto text-amber-500/80" size={32} />
+                <p className="text-sm font-semibold text-amber-300">NextDNS Account Disconnected</p>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">Please enter your NextDNS API key in Settings to stream real-time block and query logs.</p>
+              </div>
             ) : logs.length === 0 ? (
               <div className="p-12 text-center text-slate-500 space-y-1">
                 <Terminal className="mx-auto text-slate-700" size={32} />

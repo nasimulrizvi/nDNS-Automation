@@ -8,7 +8,9 @@ import {
   LogEntry, 
   AlertLogEntry,
   NextDNSProfile,
-  SystemState
+  SystemState,
+  DenylistEntry,
+  DenylistItem
 } from './src/types';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -63,21 +65,9 @@ export class ServerDB {
     // Create data directory if it doesn't exist
     await fs.mkdir(DATA_DIR, { recursive: true });
 
-    // DB Migration Check: if old profile data or mock names exist, wipe DATA_DIR to ensure fresh update
-    try {
-      const data = await fs.readFile(PROFILES_FILE, 'utf-8');
-      if (data.includes('9d2c31') || data.includes('User 2')) {
-        console.log('Old profile metadata schema detected. Wiping database files for automatic migration...');
-        await fs.rm(DATA_DIR, { recursive: true, force: true });
-        await fs.mkdir(DATA_DIR, { recursive: true });
-      }
-    } catch (e) {
-      // File doesn't exist yet, safe to proceed
-    }
-
-    // Initialize Settings (prioritize env variables if present)
+    // Initialize Settings
     const defaultSettings: AppSettings = {
-      nextDnsApiKey: process.env.NEXTDNS_API_KEY || '',
+      nextDnsApiKey: '',
       telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
       telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
       emailAlertsEnabled: false,
@@ -88,6 +78,15 @@ export class ServerDB {
     const defaultProfiles: NextDNSProfile[] = [
       {
         id: '3e1c94',
+        name: 'Primary',
+        deviceCount: 4,
+        activeRulesCount: 152,
+        queriesLast7Days: 28400,
+        blocksLast7Days: 3200,
+        status: 'active'
+      },
+      {
+        id: '151eaf',
         name: 'Router',
         deviceCount: 5,
         activeRulesCount: 152,
@@ -134,37 +133,38 @@ export class ServerDB {
     ];
     await ensureFile<NextDNSProfile[]>(PROFILES_FILE, defaultProfiles);
 
-    // Initialize Blocklists
+    // Initialize Blocklists with fixed historical timestamps so initial seeds remain permanently locked
+    const INITIAL_SEED_TIMESTAMP = '2026-01-01T00:00:00.000Z';
     const defaultBlocklists: Blocklists = {
       general: [
-        'pornhub.com',
-        'badwebsite.com',
-        'doubleclick.net',
-        'trackers-r-us.org',
-        'coin-miner.ru',
-        'malware-distribution-node.info',
-        'ads-server-xyz.com',
-        'phishing-portal-scam.net'
+        { domain: 'pornhub.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+        { domain: 'badwebsite.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+        { domain: 'doubleclick.net', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+        { domain: 'trackers-r-us.org', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+        { domain: 'coin-miner.ru', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+        { domain: 'malware-distribution-node.info', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+        { domain: 'ads-server-xyz.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+        { domain: 'phishing-portal-scam.net', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' }
       ],
       perUser: {
         'router': [
-          'ads-server-xyz.com'
+          { domain: 'ads-server-xyz.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' }
         ],
         'mine': [
-          'distraction-reddit.com',
-          'hackernews-time-waster.org'
+          { domain: 'distraction-reddit.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+          { domain: 'hackernews-time-waster.org', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' }
         ],
         'ammu': [
-          'tiktok.com',
-          'instagram.com'
+          { domain: 'tiktok.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+          { domain: 'instagram.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' }
         ],
         'abbu': [
-          'tiktok.com',
-          'freefiremobile.com'
+          { domain: 'tiktok.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+          { domain: 'freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' }
         ],
         'others': [
-          'gaming-portal-distraction.net',
-          'roblox-unblocked.org'
+          { domain: 'gaming-portal-distraction.net', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+          { domain: 'roblox-unblocked.org', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' }
         ]
       }
     };
@@ -237,10 +237,6 @@ export class ServerDB {
       const raw = await fs.readFile(SETTINGS_FILE, 'utf-8');
       const settings = JSON.parse(raw) as AppSettings;
 
-      // Smart fallback to environment variables if settings fields are empty
-      if (!settings.nextDnsApiKey && process.env.NEXTDNS_API_KEY) {
-        settings.nextDnsApiKey = process.env.NEXTDNS_API_KEY.trim();
-      }
       if (!settings.telegramBotToken && process.env.TELEGRAM_BOT_TOKEN) {
         settings.telegramBotToken = process.env.TELEGRAM_BOT_TOKEN.trim();
       }
@@ -491,4 +487,121 @@ export class ServerDB {
       seenDomains: await this.getSeenDomains(),
     };
   }
+
+  // Audit report for verifying timestamp preservation across deploy/restart cycles
+  static async getTimestampAuditReport(): Promise<{
+    totalDomains: number;
+    lockedCount: number;
+    unlockedCount: number;
+    domains: { domain: string; scope: string; addedAt: string; isLocked: boolean; updatedBy?: string }[];
+  }> {
+    const blocklists = await this.getBlocklists();
+    const domains: { domain: string; scope: string; addedAt: string; isLocked: boolean; updatedBy?: string }[] = [];
+
+    const processItem = (item: DenylistEntry, scope: string) => {
+      const norm = typeof item === 'string' ? { domain: item, addedAt: undefined, updatedBy: undefined } : item;
+      const locked = isDomainLocked(item);
+      domains.push({
+        domain: norm.domain,
+        scope,
+        addedAt: norm.addedAt || 'NONE (Pre-existing/Legacy)',
+        isLocked: locked,
+        updatedBy: norm.updatedBy
+      });
+    };
+
+    (blocklists.general || []).forEach(item => processItem(item, 'general'));
+    if (blocklists.perUser) {
+      Object.entries(blocklists.perUser).forEach(([uKey, list]) => {
+        (list || []).forEach(item => processItem(item, `perUser:${uKey}`));
+      });
+    }
+
+    const lockedCount = domains.filter(d => d.isLocked).length;
+    const unlockedCount = domains.length - lockedCount;
+
+    return {
+      totalDomains: domains.length,
+      lockedCount,
+      unlockedCount,
+      domains
+    };
+  }
+}
+
+export function isDomainLocked(item: DenylistEntry): boolean {
+  if (!item) return true;
+  if (typeof item === 'string') return true; // Legacy string = pre-existing => locked
+  const addedAt = item.addedAt;
+  if (!addedAt) return true; // Missing timestamp = pre-existing => locked
+  const addedMs = new Date(addedAt).getTime();
+  if (isNaN(addedMs)) return true; // Unparseable date = locked
+  
+  const elapsedMs = Date.now() - addedMs;
+  const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+  return elapsedMs > TWENTY_FOUR_HOURS_MS;
+}
+
+export function createOrPreserveDenylistItem(
+  domain: string,
+  existingBlocklists?: Blocklists | null,
+  options?: {
+    alertEnabled?: boolean;
+    updatedBy?: 'native' | 'app';
+    forcedAddedAt?: string;
+  }
+): DenylistItem {
+  const cleanDomain = domain.toLowerCase().trim();
+
+  let existingAddedAt: string | undefined = undefined;
+  let existingAlertEnabled: boolean = options?.alertEnabled ?? false;
+  let existingUpdatedBy: 'native' | 'app' = options?.updatedBy ?? 'app';
+
+  if (existingBlocklists) {
+    const findInList = (list: DenylistEntry[] | undefined): DenylistItem | undefined => {
+      if (!list) return undefined;
+      for (const item of list) {
+        if (typeof item === 'object' && item !== null) {
+          if ((item.domain || '').toLowerCase().trim() === cleanDomain) {
+            return item;
+          }
+        } else if (typeof item === 'string') {
+          if (item.toLowerCase().trim() === cleanDomain) {
+            return { domain: cleanDomain, alertEnabled: false };
+          }
+        }
+      }
+      return undefined;
+    };
+
+    const foundGen = findInList(existingBlocklists.general);
+    if (foundGen) {
+      existingAddedAt = foundGen.addedAt;
+      existingAlertEnabled = foundGen.alertEnabled ?? existingAlertEnabled;
+      existingUpdatedBy = foundGen.updatedBy ?? existingUpdatedBy;
+    } else if (existingBlocklists.perUser) {
+      for (const list of Object.values(existingBlocklists.perUser)) {
+        const found = findInList(list);
+        if (found) {
+          existingAddedAt = found.addedAt;
+          existingAlertEnabled = found.alertEnabled ?? existingAlertEnabled;
+          existingUpdatedBy = found.updatedBy ?? existingUpdatedBy;
+          break;
+        }
+      }
+    }
+  }
+
+  // Preservation Rule: If domain ALREADY HAS an addedAt, preserve it byte-for-byte!
+  // Never blind-write a new timestamp over an existing one.
+  const finalAddedAt = existingAddedAt 
+    || options?.forcedAddedAt 
+    || new Date().toISOString();
+
+  return {
+    domain: cleanDomain,
+    alertEnabled: options?.alertEnabled ?? existingAlertEnabled,
+    addedAt: finalAddedAt,
+    updatedBy: options?.updatedBy ?? existingUpdatedBy,
+  };
 }

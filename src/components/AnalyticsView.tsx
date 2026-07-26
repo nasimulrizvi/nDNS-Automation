@@ -5,7 +5,12 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pi
 import { BarChart3, PieChartIcon, ArrowRightLeft, Users, ShieldAlert, Smartphone, Layers, Laptop, User, Wifi, Shield } from 'lucide-react';
 import Skeleton from './Skeleton';
 
-export default function AnalyticsView() {
+interface AnalyticsViewProps {
+  hasApiKey?: boolean;
+  onNavigate?: (tab: string) => void;
+}
+
+export default function AnalyticsView({ hasApiKey = true, onNavigate }: AnalyticsViewProps) {
   const [analytics, setAnalytics] = useState<UserAnalytics[]>([]);
   const [deviceAnalytics, setDeviceAnalytics] = useState<DeviceAnalytics[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,7 +108,25 @@ export default function AnalyticsView() {
 
   return (
     <div className="space-y-6" id="analytics-view-container">
-      {/* Top Header Controls */}
+      {!hasApiKey ? (
+        <div className="bg-amber-950/20 border border-amber-500/20 rounded-xl p-8 text-center space-y-3">
+          <Shield className="mx-auto text-amber-400" size={32} />
+          <h3 className="text-amber-200 font-bold text-sm">NextDNS Account Disconnected</h3>
+          <p className="text-xs text-amber-300/80 max-w-md mx-auto">
+            Please configure your NextDNS API key in Settings to connect your account and view traffic analytics.
+          </p>
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('settings')}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs transition"
+            >
+              Configure API Key
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Top Header Controls */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -200,7 +223,13 @@ export default function AnalyticsView() {
       ) : viewMode === 'profile' ? (
         /* --- PROFILE ANALYTICS CONTENT --- */
         !activeAnalytics ? (
-          <div className="p-8 text-center text-slate-500 text-sm">No profiles found.</div>
+          <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-12 text-center space-y-3">
+            <ShieldAlert size={32} className="mx-auto text-slate-600" />
+            <h3 className="text-slate-300 font-bold text-sm">No Profile Analytics Found</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+              No analytics records could be loaded for NextDNS profiles. Ensure your NextDNS API key is entered in Settings and active profiles exist.
+            </p>
+          </div>
         ) : (
           <div className="space-y-6">
             {/* Traffic Summary Cards */}
@@ -315,7 +344,13 @@ export default function AnalyticsView() {
       ) : (
         /* --- DEVICE ANALYTICS CONTENT --- */
         !activeDevice ? (
-          <div className="p-8 text-center text-slate-500 text-sm">No device data found.</div>
+          <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-12 text-center space-y-3">
+            <Smartphone size={32} className="mx-auto text-slate-600" />
+            <h3 className="text-slate-300 font-bold text-sm">No Device Data Found</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+              No device analytics could be retrieved from NextDNS. Devices will appear here as query telemetry is recorded.
+            </p>
+          </div>
         ) : (
           <div className="space-y-6">
             {/* Device Info & Traffic Summary Cards */}
@@ -409,6 +444,8 @@ export default function AnalyticsView() {
             </div>
           </div>
         )
+      )}
+        </>
       )}
     </div>
   );

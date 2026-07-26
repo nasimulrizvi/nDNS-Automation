@@ -270,6 +270,7 @@ export default function SettingsView({ settings = { telegramBotToken: '', telegr
                 <div className="font-mono text-[10.5px] text-purple-300/90 leading-relaxed grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 pt-0.5">
                   <span>• /status — Traffic & block summary</span>
                   <span>• /block &lt;domain&gt; — Add to Shared Denylist</span>
+                  <span>• /unblock &lt;domain&gt; — Unblock within 24h limit</span>
                   <span>• /watch &lt;domain&gt; — Add to Watchlist Alerts</span>
                   <span>• /unwatch &lt;domain&gt; — Remove from Watchlist</span>
                   <span>• /report — Instant top-domains report</span>

@@ -39,8 +39,8 @@ export class ClientAPI {
     });
   }
 
-  static async saveBlocklists(blocklists: Blocklists): Promise<void> {
-    await this.request('/api/blocklists', {
+  static async saveBlocklists(blocklists: Blocklists): Promise<{ success: boolean; message: string; sync?: { success: boolean; syncedCount: number; message: string } }> {
+    return await this.request<{ success: boolean; message: string; sync?: { success: boolean; syncedCount: number; message: string } }>('/api/blocklists', {
       method: 'POST',
       body: JSON.stringify({ blocklists }),
     });
