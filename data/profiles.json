@@ -2,10 +2,10 @@
   {
     "id": "3e1c94",
     "name": "Primary",
-    "deviceCount": 7,
-    "activeRulesCount": 48,
-    "queriesLast7Days": 160153,
-    "blocksLast7Days": 44487,
+    "deviceCount": 6,
+    "activeRulesCount": 62,
+    "queriesLast7Days": 153151,
+    "blocksLast7Days": 32632,
     "status": "active"
   },
   {
@@ -40,8 +40,8 @@
     "name": "Others",
     "deviceCount": 1,
     "activeRulesCount": 10,
-    "queriesLast7Days": 2947,
-    "blocksLast7Days": 253,
+    "queriesLast7Days": 0,
+    "blocksLast7Days": 0,
     "status": "active"
   },
   {
@@ -49,8 +49,8 @@
     "name": "Router",
     "deviceCount": 1,
     "activeRulesCount": 9,
-    "queriesLast7Days": 17035,
-    "blocksLast7Days": 2791,
+    "queriesLast7Days": 50278,
+    "blocksLast7Days": 7399,
     "status": "active"
   }
 ]

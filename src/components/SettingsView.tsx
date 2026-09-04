@@ -1,9 +1,11 @@
 import { useState, useEffect, FormEvent } from 'react';
-import { AppSettings } from '../types';
+import { AppSettings, TurnstileStatus } from '../types';
 import { formatDateTimeUtcPlus6 } from '../date-utils';
-import { Settings, Shield, Bot, Send, Trash2, Eye, EyeOff, CheckCircle, AlertCircle, RefreshCw, HardDrive } from 'lucide-react';
+import { ClientAPI } from '../api';
+import { Settings, Shield, Bot, Send, Trash2, Eye, EyeOff, CheckCircle, AlertCircle, RefreshCw, HardDrive, Lock, ShieldCheck, ExternalLink } from 'lucide-react';
 import { motion } from 'motion/react';
 import Skeleton from './Skeleton';
+import TurnstileSecurityModal from './TurnstileSecurityModal';
 
 interface SettingsViewProps {
   settings: AppSettings;
@@ -32,6 +34,15 @@ export default function SettingsView({ settings = { telegramBotToken: '', telegr
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus | null>(null);
+  const [showTurnstileModal, setShowTurnstileModal] = useState(false);
+
+  useEffect(() => {
+    ClientAPI.getTurnstileStatus()
+      .then(setTurnstileStatus)
+      .catch((err) => console.warn('[Turnstile] Could not load Turnstile status:', err));
+  }, []);
 
   const [registeringWebhook, setRegisteringWebhook] = useState(false);
 
@@ -93,6 +104,16 @@ export default function SettingsView({ settings = { telegramBotToken: '', telegr
     setStatus(null);
 
     try {
+      const serverRes = await fetch('/api/telegram/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const json = await serverRes.json();
+      if (serverRes.ok && json.success) {
+        setStatus({ type: 'success', message: 'Test message dispatched to Telegram! Check your phone.' });
+        return;
+      }
+      // Fallback to direct client call if server test had issues
       const message = `🤖 <b>NextDNS Automation — Test Dispatch</b>\n\n` +
         `✅ Your Telegram notification integration is active and correctly configured!\n` +
         `🌐 <b>Host Container:</b> Cloud Run Sandbox\n` +
@@ -297,6 +318,61 @@ export default function SettingsView({ settings = { telegramBotToken: '', telegr
 
         {/* Automation & Database Management Column */}
         <div className="space-y-4">
+          {/* Cloudflare Turnstile Bot Protection Card */}
+          <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4" id="cloudflare-turnstile-settings-card">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                <Shield className="w-4 h-4 text-orange-400" />
+                <span>Cloudflare Turnstile</span>
+              </h3>
+              <span className="px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Active
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Cloudflare Turnstile delivers privacy-preserving bot detection and site verification without intrusive CAPTCHA puzzles.
+            </p>
+
+            <div className="space-y-2 bg-slate-950/60 p-3.5 rounded-lg border border-slate-800/50 text-xs font-mono">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-sans">Protection Mode:</span>
+                <span className="text-cyan-400 font-semibold">Managed Challenge</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-sans">Site Key:</span>
+                <span className="text-slate-300 font-mono text-[11px]">
+                  {turnstileStatus?.maskedSiteKey || '1x0000...00AA'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-sans">Validation Mode:</span>
+                <span className={turnstileStatus?.isCustomSecretKey ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
+                  {turnstileStatus?.isCustomSecretKey ? 'Production Live API' : 'Cloudflare Testing Mode'}
+                </span>
+              </div>
+              {turnstileStatus?.lastVerification && (
+                <div className="flex justify-between items-center pt-1 border-t border-slate-800/50">
+                  <span className="text-slate-400 font-sans">Last Verified:</span>
+                  <span className="text-emerald-400 text-[10.5px]">
+                    {formatDateTimeUtcPlus6(new Date(turnstileStatus.lastVerification.timestamp))}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              id="test-turnstile-challenge-btn"
+              onClick={() => setShowTurnstileModal(true)}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition shadow-lg shadow-orange-950/30"
+            >
+              <ShieldCheck size={14} />
+              <span>Test Turnstile Challenge</span>
+            </button>
+          </div>
+
           {/* Automation Control Section */}
           <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-4">
             <h3 className="font-bold text-white text-sm flex items-center gap-2">
@@ -358,6 +434,15 @@ export default function SettingsView({ settings = { telegramBotToken: '', telegr
           </div>
         </div>
       </div>
+
+      <TurnstileSecurityModal
+        isOpen={showTurnstileModal}
+        onClose={() => setShowTurnstileModal(false)}
+        siteKey={turnstileStatus?.siteKey}
+        onVerified={() => {
+          ClientAPI.getTurnstileStatus().then(setTurnstileStatus).catch(console.error);
+        }}
+      />
     </div>
   );
 }

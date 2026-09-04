@@ -1,20 +1,40 @@
-import { SystemState, UserAnalytics, DeviceAnalytics, AppSettings, Blocklists, Watchlist, ThreatFeed } from './types';
+import { SystemState, UserAnalytics, DeviceAnalytics, AppSettings, Blocklists, Watchlist, ThreatFeed, TurnstileStatus, TurnstileVerificationResponse } from './types';
 
 export class ClientAPI {
-  private static async request<T>(path: string, options?: RequestInit): Promise<T> {
-    const res = await fetch(path, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    });
+  private static async request<T>(path: string, options?: RequestInit, retries = 2): Promise<T> {
+    try {
+      const res = await fetch(path, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
+      });
 
-    const json = await res.json() as any;
-    if (!res.ok || !json.success) {
-      throw new Error(json.message || `Request failed with status ${res.status}`);
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`);
+      }
+
+      let json: any;
+      try {
+        json = await res.json();
+      } catch (e: any) {
+        throw new Error(`Failed to parse JSON response: ${e.message}`);
+      }
+
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || `Request failed with status ${res.status}`);
+      }
+      return json;
+    } catch (err: any) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 750));
+        return this.request<T>(path, options, retries - 1);
+      }
+      throw err;
     }
-    return json;
   }
 
   static async getState(): Promise<SystemState> {
@@ -28,8 +48,13 @@ export class ClientAPI {
   }
 
   static async getDeviceAnalytics(): Promise<DeviceAnalytics[]> {
-    const res = await this.request<{ devices: DeviceAnalytics[] }>('/api/analytics/devices');
-    return res.devices;
+    try {
+      const res = await this.request<{ devices: DeviceAnalytics[] }>('/api/analytics/devices', undefined, 2);
+      return res.devices || [];
+    } catch (err: any) {
+      console.warn('[ClientAPI] getDeviceAnalytics temporary fetch notice:', err?.message || err);
+      return [];
+    }
   }
 
   static async saveSettings(settings: AppSettings): Promise<void> {
@@ -90,5 +115,16 @@ export class ClientAPI {
 
   static async resetDatabase(): Promise<void> {
     await this.request('/api/db/reset', { method: 'POST' });
+  }
+
+  static async getTurnstileStatus(): Promise<TurnstileStatus> {
+    return await this.request<TurnstileStatus>('/api/turnstile/status');
+  }
+
+  static async verifyTurnstileToken(token: string): Promise<TurnstileVerificationResponse> {
+    return await this.request<TurnstileVerificationResponse>('/api/turnstile/verify', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
   }
 }

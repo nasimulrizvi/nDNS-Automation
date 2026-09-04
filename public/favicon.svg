@@ -1,16 +1,88 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%" fill="none">
   <defs>
-    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#3b82f6" />
-      <stop offset="100%" stop-color="#1d4ed8" />
+    <!-- Master Brand Gradient from Cyan-Blue to Teal-Green -->
+    <linearGradient id="ndnsBrandGrad" x1="0%" y1="20%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#0080FF" />
+      <stop offset="30%" stop-color="#00A8FF" />
+      <stop offset="65%" stop-color="#00D8E6" />
+      <stop offset="100%" stop-color="#00E5A3" />
     </linearGradient>
-    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.9" />
-      <stop offset="100%" stop-color="#2563eb" stop-opacity="0.3" />
+
+    <linearGradient id="globeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00E5C0" />
+      <stop offset="100%" stop-color="#00F0A0" />
+    </linearGradient>
+
+    <linearGradient id="circuitGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00D2EA" />
+      <stop offset="100%" stop-color="#00E5A3" />
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="112" fill="#0b0f19"/>
-  <path d="M256 72 C324 72, 392 88, 392 144 C392 272, 332 376, 256 440 C180 376, 120 272, 120 144 C120 88, 188 72, 256 72 Z" fill="url(#shieldGrad)"/>
-  <path d="M256 104 C308 104, 360 118, 360 160 C360 260, 312 344, 256 396 C200 344, 152 260, 152 160 C152 118, 204 104, 256 104 Z" fill="url(#glowGrad)"/>
-  <path d="M212 252 L244 284 L304 220" fill="none" stroke="#ffffff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 1. Globe in Background -->
+  <g stroke="url(#globeGrad)" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Outer Globe Circle -->
+    <path d="M 235 160 A 105 105 0 1 1 315 332" stroke-width="8" opacity="0.95" />
+    <!-- Latitude 1 -->
+    <path d="M 220 185 C 270 155 370 155 425 200" stroke-width="7" opacity="0.85" />
+    <!-- Latitude 2 -->
+    <path d="M 312 333 C 360 325 410 285 435 225" stroke-width="7" opacity="0.85" />
+    <!-- Meridian -->
+    <path d="M 300 128 C 322 180 320 270 300 335" stroke-width="7" opacity="0.85" />
+  </g>
+
+  <!-- 2. Main 'n' Monogram & Left Motion Lines -->
+  <g fill="url(#ndnsBrandGrad)">
+    <!-- Top Cap extension of 'n' -->
+    <path d="
+      M 115 190
+      C 102 190 95 198 95 210
+      C 95 222 102 230 115 230
+      L 130 230
+      L 130 360
+      C 130 371 139 380 150 380
+      L 170 380
+      C 181 380 190 371 190 360
+      L 190 275
+      C 190 248 208 232 232 232
+      C 255 232 265 246 265 272
+      L 265 360
+      C 265 371 274 380 285 380
+      L 305 380
+      C 316 380 325 371 325 360
+      L 325 258
+      C 325 212 295 185 245 185
+      C 210 185 192 200 182 218
+      L 182 205
+      C 182 196 174 190 165 190
+      Z
+    "/>
+
+    <!-- Left Speed Lines -->
+    <!-- Top Speed Line -->
+    <circle cx="50" cy="250" r="10" />
+    <path d="M 78 240 H 122 C 127 240 132 244 132 250 C 132 256 127 260 122 260 H 78 C 73 260 68 256 68 250 C 68 244 73 240 78 240 Z" />
+
+    <!-- Middle Speed Line -->
+    <path d="M 48 280 H 122 C 127 280 132 284 132 290 C 132 296 127 300 122 300 H 48 C 43 300 38 296 38 290 C 38 284 43 280 48 280 Z" />
+
+    <!-- Bottom Speed Line -->
+    <circle cx="75" cy="330" r="10" />
+    <path d="M 100 320 H 122 C 127 320 132 324 132 330 C 132 336 127 340 122 340 H 100 C 95 340 90 336 90 330 C 90 324 95 320 100 320 Z" />
+  </g>
+
+  <!-- 3. Right Circuit Traces & Nodes -->
+  <g stroke="url(#circuitGrad)" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Top Circuit Trace -->
+    <path d="M 325 252 H 415" stroke-width="12" />
+    <circle cx="435" cy="252" r="11" fill="none" stroke="url(#circuitGrad)" stroke-width="8" />
+
+    <!-- Middle Circuit Trace -->
+    <path d="M 325 290 H 372" stroke-width="12" />
+    <circle cx="392" cy="290" r="11" fill="none" stroke="url(#circuitGrad)" stroke-width="8" />
+
+    <!-- Bottom Circuit Trace -->
+    <path d="M 325 328 H 360 L 388 348 H 422" stroke-width="12" />
+    <circle cx="442" cy="348" r="11" fill="none" stroke="url(#circuitGrad)" stroke-width="8" />
+  </g>
 </svg>

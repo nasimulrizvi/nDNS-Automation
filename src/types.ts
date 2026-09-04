@@ -140,3 +140,30 @@ export interface SystemState {
   alerts: AlertLogEntry[];
   seenDomains: { [key: string]: string }; // Map of "user:domain" -> "YYYY-MM-DD"
 }
+
+export interface TurnstileStatus {
+  enabled: boolean;
+  siteKey: string;
+  isCustomSiteKey: boolean;
+  isCustomSecretKey: boolean;
+  maskedSiteKey: string;
+  lastVerification?: {
+    success: boolean;
+    timestamp: string;
+    hostname?: string;
+    errorCodes?: string[];
+  } | null;
+}
+
+export interface TurnstileVerificationResponse {
+  success: boolean;
+  result?: {
+    success: boolean;
+    challenge_ts?: string;
+    hostname?: string;
+    'error-codes'?: string[];
+    isTestMode?: boolean;
+    message?: string;
+  };
+  message?: string;
+}

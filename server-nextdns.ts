@@ -11,13 +11,32 @@ export function getProfileKey(profile: { id?: string; name?: string }): string {
   return clean || profile.id || 'others';
 }
 
+// Helper for resilient fetch calls with strict timeout
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 4500): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class NextDNSService {
   private static activeSSEListeners: { [profileId: string]: any } = {};
   private static deviceAnalyticsCache: { data: any[]; timestamp: number } | null = null;
-  private static CACHE_TTL_MS = 30000; // 30 seconds cache TTL
+  private static dynamicProfilesCache: { data: NextDNSProfile[]; timestamp: number } | null = null;
+  private static ongoingDeviceAnalyticsPromise: Promise<any[]> | null = null;
+  private static CACHE_TTL_MS = 20000; // 20 seconds cache TTL
+  private static DEVICE_CACHE_TTL_MS = 60000; // 60 seconds cache TTL for device analytics
 
   // Dynamically aggregate and fetch profile data from NextDNS or mock dynamically
-  static async getDynamicProfiles(): Promise<NextDNSProfile[]> {
+  static async getDynamicProfiles(forceRefresh = false): Promise<NextDNSProfile[]> {
+    const now = Date.now();
+    if (!forceRefresh && this.dynamicProfilesCache && (now - this.dynamicProfilesCache.timestamp < this.CACHE_TTL_MS)) {
+      return this.dynamicProfilesCache.data;
+    }
+
     const settings = await ServerDB.getSettings();
     const localProfiles = await ServerDB.getProfiles();
     const blocklists = await ServerDB.getBlocklists();
@@ -35,81 +54,97 @@ export class NextDNSService {
         return localProfiles;
       }
 
-      const mergedProfiles: NextDNSProfile[] = [];
+      // Fetch profile stats in parallel with timeouts for blazing fast response (<1s)
+      const mergedProfiles: NextDNSProfile[] = await Promise.all(
+        apiProfiles.map(async (apiP) => {
+          let queries = 0;
+          let blocks = 0;
 
-      for (const apiP of apiProfiles) {
-        let queries = 0;
-        let blocks = 0;
-        
-        try {
-          const res = await fetch(`https://api.nextdns.io/profiles/${apiP.id}/analytics/status?from=-7d`, {
-            headers: { 'X-Api-Key': settings.nextDnsApiKey },
-          });
-          if (res.ok) {
-            const json = await res.json() as any;
-            const dataArr = json.data || (Array.isArray(json) ? json : []);
-            let totalQ = 0;
-            let totalB = 0;
-            for (const item of dataArr) {
-              const sCount = typeof item.queries === 'number' ? item.queries : (item.count || item.blocks || 0);
-              const sKey = (item.id || item.status || item.name || '').toString().toLowerCase();
-              totalQ += sCount;
-              if (sKey === 'blocked' || sKey === 'denied' || sKey === 'blacklist' || sKey === 'block') {
-                totalB += sCount;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+            const res = await fetch(`https://api.nextdns.io/profiles/${apiP.id}/analytics/status?from=-7d`, {
+              headers: { 'X-Api-Key': settings.nextDnsApiKey },
+              signal: controller.signal
+            }).finally(() => clearTimeout(timeoutId));
+
+            if (res.ok) {
+              const json = await res.json() as any;
+              const dataArr = json.data || (Array.isArray(json) ? json : []);
+              let totalQ = 0;
+              let totalB = 0;
+              for (const item of dataArr) {
+                const sCount = typeof item.queries === 'number' ? item.queries : (item.count || item.blocks || 0);
+                const sKey = (item.id || item.status || item.name || '').toString().toLowerCase();
+                totalQ += sCount;
+                if (sKey === 'blocked' || sKey === 'denied' || sKey === 'blacklist' || sKey === 'block') {
+                  totalB += sCount;
+                }
               }
+              queries = totalQ;
+              blocks = totalB;
             }
-            queries = totalQ;
-            blocks = totalB;
+          } catch (e) {
+            queries = 0;
+            blocks = 0;
           }
-        } catch (e) {
-          console.error(`Error fetching real analytics for profile ${apiP.id}:`, e);
-          queries = 0;
-          blocks = 0;
-        }
 
-        // Dynamically calculate active rules count based on blocklists.json
-        const userKey = getProfileKey({ id: apiP.id, name: apiP.name });
-        const perUserCount = blocklists.perUser[userKey]?.length || 0;
-        const activeRulesCount = blocklists.general.length + perUserCount;
+          // Dynamically calculate active rules count based on blocklists.json
+          const userKey = getProfileKey({ id: apiP.id, name: apiP.name });
+          const perUserCount = (blocklists.perUser && (blocklists.perUser[userKey] || blocklists.perUser[apiP.id]))?.length || 0;
+          const activeRulesCount = (blocklists.general?.length || 0) + perUserCount;
 
-        // Devices count from NextDNS API or logs
-        let deviceCount = 0;
-        try {
-          const devRes = await fetch(`https://api.nextdns.io/profiles/${apiP.id}/analytics/devices?from=-7d&limit=100`, {
-            headers: { 'X-Api-Key': settings.nextDnsApiKey },
-          });
-          if (devRes.ok) {
-            const devJson = await devRes.json() as any;
-            const devArr = devJson.data || [];
-            deviceCount = devArr.length;
+          // Devices count from NextDNS API or logs
+          let deviceCount = 0;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+            const devRes = await fetch(`https://api.nextdns.io/profiles/${apiP.id}/analytics/devices?from=-7d&limit=100`, {
+              headers: { 'X-Api-Key': settings.nextDnsApiKey },
+              signal: controller.signal
+            }).finally(() => clearTimeout(timeoutId));
+
+            if (devRes.ok) {
+              const devJson = await devRes.json() as any;
+              const devArr = devJson.data || [];
+              deviceCount = devArr.length;
+            }
+          } catch (e) {}
+
+          if (deviceCount === 0) {
+            const profileLogs = logs.filter(l => l.profileName?.toLowerCase() === apiP.name.toLowerCase() || l.profileName === apiP.id);
+            const uniqueDevices = new Set(profileLogs.map(l => l.deviceName));
+            deviceCount = uniqueDevices.size;
           }
-        } catch (e) {}
 
-        if (deviceCount === 0) {
-          const profileLogs = logs.filter(l => l.profileName?.toLowerCase() === apiP.name.toLowerCase() || l.profileName === apiP.id);
-          const uniqueDevices = new Set(profileLogs.map(l => l.deviceName));
-          deviceCount = uniqueDevices.size;
-        }
+          const existing = localProfiles.find(p => p.id === apiP.id);
+          const status = existing ? existing.status : 'active';
 
-        const existing = localProfiles.find(p => p.id === apiP.id);
-        const status = existing ? existing.status : 'active';
+          return {
+            id: apiP.id,
+            name: apiP.name,
+            deviceCount,
+            activeRulesCount,
+            queriesLast7Days: queries,
+            blocksLast7Days: blocks,
+            status
+          };
+        })
+      );
 
-        mergedProfiles.push({
-          id: apiP.id,
-          name: apiP.name,
-          deviceCount,
-          activeRulesCount,
-          queriesLast7Days: queries,
-          blocksLast7Days: blocks,
-          status
-        });
-      }
+      // Cache the result
+      this.dynamicProfilesCache = { data: mergedProfiles, timestamp: Date.now() };
 
-      // Save reconciled profiles to server database
-      await ServerDB.saveProfiles(mergedProfiles);
+      // Save reconciled profiles to server database asynchronously
+      ServerDB.saveProfiles(mergedProfiles).catch(() => {});
       return mergedProfiles;
     } catch (e) {
       console.error('Error fetching/merging dynamic profiles:', e);
+      if (this.dynamicProfilesCache) {
+        return this.dynamicProfilesCache.data;
+      }
       return localProfiles;
     }
   }
@@ -595,35 +630,97 @@ export class NextDNSService {
     try {
       const getDomainStr = (e: any) => (typeof e === 'string' ? e : e?.domain || '').toLowerCase().trim();
 
-      const getMap = (bl: any) => {
-        const map = new Map<string, { domain: string; scope: string }>();
-        if (bl && bl.general && Array.isArray(bl.general)) {
-          for (const item of bl.general) {
-            const d = getDomainStr(item);
-            if (d) map.set(`general:${d}`, { domain: typeof item === 'string' ? item : item.domain, scope: 'Shared General' });
+      // Collect all domains known in oldBlocklists across ALL scopes and profiles
+      const knownInOld = new Set<string>();
+      if (oldBlocklists && oldBlocklists.general && Array.isArray(oldBlocklists.general)) {
+        for (const item of oldBlocklists.general) {
+          const d = getDomainStr(item);
+          if (d) knownInOld.add(d);
+        }
+      }
+      if (oldBlocklists && oldBlocklists.perUser) {
+        for (const list of Object.values(oldBlocklists.perUser)) {
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              const d = getDomainStr(item);
+              if (d) knownInOld.add(d);
+            }
           }
         }
-        if (bl && bl.perUser) {
-          for (const [userKey, list] of Object.entries(bl.perUser)) {
-            if (Array.isArray(list)) {
-              for (const item of list) {
-                const d = getDomainStr(item);
-                if (d) map.set(`${userKey}:${d}`, { domain: typeof item === 'string' ? item : item.domain, scope: `Profile (${userKey})` });
+      }
+
+      // Load persistent seen domains map
+      const seenDomains = await ServerDB.getSeenDomains();
+
+      // Build map of new candidates from newBlocklists
+      const candidateMap = new Map<string, { domain: string; scope: string; userKey?: string }>();
+
+      if (newBlocklists && newBlocklists.general && Array.isArray(newBlocklists.general)) {
+        for (const item of newBlocklists.general) {
+          const d = getDomainStr(item);
+          if (d) {
+            candidateMap.set(`general:${d}`, {
+              domain: typeof item === 'string' ? item : item.domain,
+              scope: 'Shared General'
+            });
+          }
+        }
+      }
+      if (newBlocklists && newBlocklists.perUser) {
+        for (const [userKey, list] of Object.entries(newBlocklists.perUser)) {
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              const d = getDomainStr(item);
+              if (d) {
+                if (!candidateMap.has(`general:${d}`)) {
+                  candidateMap.set(`${userKey}:${d}`, {
+                    domain: typeof item === 'string' ? item : item.domain,
+                    scope: `Profile (${userKey})`,
+                    userKey
+                  });
+                }
               }
             }
           }
         }
-        return map;
-      };
+      }
 
-      const oldMap = getMap(oldBlocklists);
-      const newMap = getMap(newBlocklists);
-
+      let seenChanged = false;
       const additions: { domain: string; scope: string }[] = [];
-      for (const [key, val] of newMap.entries()) {
-        if (!oldMap.has(key)) {
+
+      for (const [key, val] of candidateMap.entries()) {
+        const d = getDomainStr(val.domain);
+        if (!d) continue;
+
+        // Check if domain is ALREADY known anywhere in oldBlocklists or persistent seenDomains
+        const isAlreadyKnown =
+          knownInOld.has(d) ||
+          Boolean(seenDomains[d]) ||
+          Boolean(seenDomains[`general:${d}`]) ||
+          Boolean(seenDomains[key]);
+
+        if (isAlreadyKnown) {
+          // Record in seenDomains if missing to ensure future persistence
+          if (!seenDomains[d]) {
+            seenDomains[d] = new Date().toISOString();
+            seenChanged = true;
+          }
+          if (!seenDomains[key]) {
+            seenDomains[key] = new Date().toISOString();
+            seenChanged = true;
+          }
+        } else {
+          // TRULY NEW domain!
           additions.push(val);
+          const nowIso = new Date().toISOString();
+          seenDomains[d] = nowIso;
+          seenDomains[key] = nowIso;
+          seenChanged = true;
         }
+      }
+
+      if (seenChanged) {
+        await ServerDB.saveSeenDomains(seenDomains);
       }
 
       if (additions.length === 0) return;
@@ -693,13 +790,7 @@ export class NextDNSService {
       deviceDisplay = `${deviceName} (${clientIp})`;
     }
 
-    let userKey = 'others';
-    const nameLower = profileName.toLowerCase();
-    if (nameLower.includes('router')) userKey = 'router';
-    else if (nameLower.includes('mine')) userKey = 'mine';
-    else if (nameLower.includes('ammu')) userKey = 'ammu';
-    else if (nameLower.includes('abbu')) userKey = 'abbu';
-    else if (nameLower.includes('others')) userKey = 'others';
+    const userKey = getProfileKey({ id: profileId, name: profileName });
 
     // 1. Check if domain (or any subdomain) matches Watchlist
     const isWatchlisted = this.isDomainInWatchlist(domain, watchlist.domains);
@@ -708,9 +799,10 @@ export class NextDNSService {
     let isDenylisted = false;
     let isDenylistAlertEnabled = false;
 
+    const profileDenylist = (blocklists.perUser && (blocklists.perUser[userKey] || blocklists.perUser[profileId] || [])) || [];
     const activeDenylist = [
       ...(blocklists.general || []),
-      ...(blocklists.perUser[userKey] || [])
+      ...profileDenylist
     ];
 
     for (const b of activeDenylist) {
@@ -816,10 +908,23 @@ export class NextDNSService {
   // Generate per-device analytics breakdown purely from NextDNS API across all profiles
   static async getDeviceAnalytics(): Promise<any[]> {
     const now = Date.now();
-    if (this.deviceAnalyticsCache && (now - this.deviceAnalyticsCache.timestamp < this.CACHE_TTL_MS)) {
+    if (this.deviceAnalyticsCache && (now - this.deviceAnalyticsCache.timestamp < this.DEVICE_CACHE_TTL_MS)) {
       return this.deviceAnalyticsCache.data;
     }
 
+    if (this.ongoingDeviceAnalyticsPromise) {
+      return this.ongoingDeviceAnalyticsPromise;
+    }
+
+    this.ongoingDeviceAnalyticsPromise = this.fetchDeviceAnalyticsInternal()
+      .finally(() => {
+        this.ongoingDeviceAnalyticsPromise = null;
+      });
+
+    return this.ongoingDeviceAnalyticsPromise;
+  }
+
+  private static async fetchDeviceAnalyticsInternal(): Promise<any[]> {
     const settings = await ServerDB.getSettings();
 
     if (settings.nextDnsApiKey) {
@@ -830,10 +935,10 @@ export class NextDNSService {
 
         for (const profile of profiles) {
           try {
-            // Fetch total devices list for profile
-            const res = await fetch(`https://api.nextdns.io/profiles/${profile.id}/analytics/devices?from=-7d&limit=100`, {
+            // Fetch total devices list for profile with timeout
+            const res = await fetchWithTimeout(`https://api.nextdns.io/profiles/${profile.id}/analytics/devices?from=-7d&limit=100`, {
               headers: { 'X-Api-Key': settings.nextDnsApiKey },
-            });
+            }, 4000);
 
             if (res.ok) {
               const json = await res.json() as any;
@@ -872,15 +977,15 @@ export class NextDNSService {
 
                 try {
                   const [resStatus, devBlockedRes] = await Promise.all([
-                    fetch(`https://api.nextdns.io/profiles/${profile.id}/analytics/status?from=-7d&device=${devParam}`, {
+                    fetchWithTimeout(`https://api.nextdns.io/profiles/${profile.id}/analytics/status?from=-7d&device=${devParam}`, {
                       headers: { 'X-Api-Key': settings.nextDnsApiKey },
-                    }),
-                    fetch(`https://api.nextdns.io/profiles/${profile.id}/analytics/domains?from=-7d&status=blocked&device=${devParam}&limit=100`, {
+                    }, 3500).catch(() => null),
+                    fetchWithTimeout(`https://api.nextdns.io/profiles/${profile.id}/analytics/domains?from=-7d&status=blocked&device=${devParam}&limit=100`, {
                       headers: { 'X-Api-Key': settings.nextDnsApiKey },
-                    })
+                    }, 3500).catch(() => null)
                   ]);
 
-                  if (resStatus.ok) {
+                  if (resStatus && resStatus.ok) {
                     const jsonStatus = await resStatus.json() as any;
                     const statusArray = Array.isArray(jsonStatus.data) ? jsonStatus.data : (Array.isArray(jsonStatus) ? jsonStatus : []);
                     for (const sItem of statusArray) {
@@ -893,7 +998,7 @@ export class NextDNSService {
                     }
                   }
 
-                  if (devBlockedRes.ok) {
+                  if (devBlockedRes && devBlockedRes.ok) {
                     const jsonDevDom = await devBlockedRes.json() as any;
                     const rawDevDom = jsonDevDom.data || [];
                     if (Array.isArray(rawDevDom) && rawDevDom.length > 0) {
@@ -905,7 +1010,7 @@ export class NextDNSService {
                     }
                   }
                 } catch (e) {
-                  console.error(`Error fetching device details for device ${deviceName}:`, e);
+                  // Silently ignore individual device detail errors
                 }
 
                 if (blockedDomainsList.length === 0 && blockedLogs.length > 0) {
@@ -979,7 +1084,7 @@ export class NextDNSService {
               }
             }
           } catch (e) {
-            console.error(`Error fetching device analytics for profile ${profile.id}:`, e);
+            console.warn(`[NextDNS] Minor notice fetching device list for profile ${profile.id}:`, (e as any)?.message || e);
           }
         }
 
@@ -988,7 +1093,7 @@ export class NextDNSService {
           return deviceAnalytics;
         }
       } catch (err) {
-        console.error('Error fetching NextDNS device analytics:', err);
+        console.warn('[NextDNS] Notice during device analytics pull:', (err as any)?.message || err);
       }
     }
 
@@ -1236,7 +1341,7 @@ export class NextDNSService {
     if (!settings.nextDnsApiKey) return;
 
     try {
-      const profiles = await ServerDB.getProfiles();
+      const profiles = await this.getDynamicProfiles();
       const watchlist = await ServerDB.getWatchlist();
 
       for (const profile of profiles) {

@@ -23,6 +23,7 @@ export default function DashboardView({ state, onSyncAll, syncing, onNavigate, l
   const [isFetchingDevices, setIsFetchingDevices] = useState<boolean>(false);
   const [hasLoadedDevicesOnce, setHasLoadedDevicesOnce] = useState<boolean>(false);
   const hasLoadedDevicesOnceRef = useRef<boolean>(false);
+  const isFetchingRef = useRef<boolean>(false);
   const [deviceSearch, setDeviceSearch] = useState<string>('');
   const [selectedDeviceModal, setSelectedDeviceModal] = useState<DeviceAnalytics | null>(null);
 
@@ -31,6 +32,8 @@ export default function DashboardView({ state, onSyncAll, syncing, onNavigate, l
   const blockRate = totalQueries > 0 ? ((totalBlocks / totalQueries) * 100).toFixed(1) : '0.0';
 
   const loadDeviceData = async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setIsFetchingDevices(true);
     // Only show skeleton on initial load before data is first retrieved
     if (!hasLoadedDevicesOnceRef.current) {
@@ -38,20 +41,25 @@ export default function DashboardView({ state, onSyncAll, syncing, onNavigate, l
     }
     try {
       const data = await ClientAPI.getDeviceAnalytics();
-      setDeviceAnalytics(data || []);
-      hasLoadedDevicesOnceRef.current = true;
-      setHasLoadedDevicesOnce(true);
+      if (Array.isArray(data) && data.length > 0) {
+        setDeviceAnalytics(data);
+        hasLoadedDevicesOnceRef.current = true;
+        setHasLoadedDevicesOnce(true);
 
-      setSelectedDeviceModal(prevModal => {
-        if (!prevModal) return null;
-        const updatedDev = (data || []).find(
-          d => d.deviceName === prevModal.deviceName && d.clientIp === prevModal.clientIp
-        );
-        return updatedDev || prevModal;
-      });
-    } catch (e) {
-      console.error('Failed to load device analytics:', e);
+        setSelectedDeviceModal(prevModal => {
+          if (!prevModal) return null;
+          const updatedDev = data.find(
+            d => d.deviceName === prevModal.deviceName && d.clientIp === prevModal.clientIp
+          );
+          return updatedDev || prevModal;
+        });
+      } else if (!hasLoadedDevicesOnceRef.current) {
+        setDeviceAnalytics(data || []);
+      }
+    } catch (e: any) {
+      console.warn('[Dashboard] Notice syncing device analytics:', e?.message || e);
     } finally {
+      isFetchingRef.current = false;
       setLoadingDevices(false);
       setIsFetchingDevices(false);
     }
@@ -61,9 +69,9 @@ export default function DashboardView({ state, onSyncAll, syncing, onNavigate, l
     loadDeviceData();
     const interval = setInterval(() => {
       loadDeviceData();
-    }, 5000);
+    }, 20000);
     return () => clearInterval(interval);
-  }, [state.logs]);
+  }, [settings?.nextDnsApiKey]);
 
   const filteredDevices = deviceAnalytics.filter(dev => 
     dev.deviceName.toLowerCase().includes(deviceSearch.toLowerCase()) ||

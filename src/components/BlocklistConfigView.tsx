@@ -151,7 +151,7 @@ export default function BlocklistConfigView({ blocklists, profiles = [], onSaveB
 
     const targetItem = getActiveItems().find(i => i.domain.toLowerCase() === domain.toLowerCase());
     if (targetItem && targetItem.isLocked) {
-      setError('Locked — 24-hour grace period has passed. This domain can no longer be removed via nDNS Automations.');
+      setError('Locked — This domain can no longer be removed via nDNS Automations.');
       return;
     }
 
@@ -468,7 +468,7 @@ export default function BlocklistConfigView({ blocklists, profiles = [], onSaveB
                       {item.isLocked ? (
                         <div
                           className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-950/80 border border-slate-800 text-[10.5px] text-slate-500 cursor-not-allowed select-none"
-                          title="Locked — 24-hour grace period has passed. This domain can no longer be removed via nDNS Automations."
+                          title="Locked — This domain can no longer be removed via nDNS Automations."
                         >
                           <Lock size={12} className="text-amber-500/80 shrink-0" />
                           <span className="font-semibold text-slate-400">Locked (24h)</span>

@@ -25,6 +25,8 @@ const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
 const ALERTS_FILE = path.join(DATA_DIR, 'alerts.json');
 const SEEN_DOMAINS_FILE = path.join(DATA_DIR, 'seen_domains.json');
 
+export const INITIAL_SEED_TIMESTAMP = '2026-01-01T00:00:00.000Z';
+
 // Helper to ensure file exists with default content
 async function ensureFile<T>(filePath: string, defaultValue: T): Promise<T> {
   try {
@@ -134,7 +136,6 @@ export class ServerDB {
     await ensureFile<NextDNSProfile[]>(PROFILES_FILE, defaultProfiles);
 
     // Initialize Blocklists with fixed historical timestamps so initial seeds remain permanently locked
-    const INITIAL_SEED_TIMESTAMP = '2026-01-01T00:00:00.000Z';
     const defaultBlocklists: Blocklists = {
       general: [
         { domain: 'pornhub.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
@@ -147,6 +148,17 @@ export class ServerDB {
         { domain: 'phishing-portal-scam.net', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' }
       ],
       perUser: {
+        'primary': [
+          { domain: 'dl-sg-production.freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'native' },
+          { domain: 'dl.castle.freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'native' },
+          { domain: 'dl.dir.freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'native' },
+          { domain: 'gin.freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'native' },
+          { domain: 'freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' },
+          { domain: 'craffactory.us.freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'native' },
+          { domain: 'creditappeal.ind.freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'native' },
+          { domain: 'creditappeal.sea.freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'native' },
+          { domain: 'gamesecurity.sea.freefiremobile.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'native' }
+        ],
         'router': [
           { domain: 'ads-server-xyz.com', alertEnabled: false, addedAt: INITIAL_SEED_TIMESTAMP, updatedBy: 'app' }
         ],
@@ -219,8 +231,22 @@ export class ServerDB {
     const defaultAlerts: AlertLogEntry[] = [];
     await ensureFile<AlertLogEntry[]>(ALERTS_FILE, defaultAlerts);
 
-    // Initialize Seen Domains (for deduplication)
+    // Initialize Seen Domains (for deduplication and preventing repeat Telegram alerts across restarts)
     const defaultSeen: { [key: string]: string } = {};
+    const seedDomains = [
+      'pornhub.com', 'badwebsite.com', 'doubleclick.net', 'trackers-r-us.org',
+      'coin-miner.ru', 'malware-distribution-node.info', 'ads-server-xyz.com', 'phishing-portal-scam.net',
+      'dl-sg-production.freefiremobile.com', 'dl.castle.freefiremobile.com', 'dl.dir.freefiremobile.com',
+      'gin.freefiremobile.com', 'freefiremobile.com', 'craffactory.us.freefiremobile.com',
+      'creditappeal.ind.freefiremobile.com', 'creditappeal.sea.freefiremobile.com', 'gamesecurity.sea.freefiremobile.com',
+      'distraction-reddit.com', 'hackernews-time-waster.org', 'tiktok.com', 'instagram.com',
+      'gaming-portal-distraction.net', 'roblox-unblocked.org'
+    ];
+    for (const d of seedDomains) {
+      defaultSeen[d] = INITIAL_SEED_TIMESTAMP;
+      defaultSeen[`primary:${d}`] = INITIAL_SEED_TIMESTAMP;
+      defaultSeen[`general:${d}`] = INITIAL_SEED_TIMESTAMP;
+    }
     await ensureFile<{ [key: string]: string }>(SEEN_DOMAINS_FILE, defaultSeen);
 
     this.initialized = true;
@@ -445,7 +471,50 @@ export class ServerDB {
     await this.initialize();
     const release = await this.dbMutex.lock();
     try {
-      return JSON.parse(await fs.readFile(SEEN_DOMAINS_FILE, 'utf-8'));
+      let seen: { [key: string]: string } = {};
+      try {
+        const raw = await fs.readFile(SEEN_DOMAINS_FILE, 'utf-8');
+        seen = JSON.parse(raw);
+      } catch {
+        seen = {};
+      }
+
+      let dirty = false;
+      try {
+        const blRaw = await fs.readFile(BLOCKLISTS_FILE, 'utf-8');
+        const bl = JSON.parse(blRaw);
+        const getDomainStr = (e: any) => (typeof e === 'string' ? e : e?.domain || '').toLowerCase().trim();
+        const processItem = (e: any, scopePrefix: string) => {
+          const d = getDomainStr(e);
+          if (d) {
+            const timeVal = (typeof e === 'object' && e?.addedAt) ? e.addedAt : INITIAL_SEED_TIMESTAMP;
+            if (!seen[d]) {
+              seen[d] = timeVal;
+              dirty = true;
+            }
+            if (!seen[`${scopePrefix}:${d}`]) {
+              seen[`${scopePrefix}:${d}`] = timeVal;
+              dirty = true;
+            }
+          }
+        };
+        if (bl.general && Array.isArray(bl.general)) {
+          bl.general.forEach((e: any) => processItem(e, 'general'));
+        }
+        if (bl.perUser && typeof bl.perUser === 'object') {
+          Object.entries(bl.perUser).forEach(([uKey, list]) => {
+            if (Array.isArray(list)) list.forEach((e: any) => processItem(e, uKey));
+          });
+        }
+      } catch (e) {
+        // ignore if blocklists read fails
+      }
+
+      if (dirty) {
+        await fs.writeFile(SEEN_DOMAINS_FILE, JSON.stringify(seen, null, 2), 'utf-8');
+      }
+
+      return seen;
     } finally {
       release();
     }

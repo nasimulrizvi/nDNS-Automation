@@ -65,7 +65,19 @@ export class ThreatFeedService {
     let updatedFeeds = [...feeds];
 
     const getDomainStr = (d: any) => (typeof d === 'string' ? d : d?.domain || '').toLowerCase().trim();
-    const currentGeneralSet = new Set(blocklists.general.map(getDomainStr));
+    const currentGeneralSet = new Set<string>();
+    (blocklists.general || []).forEach(item => {
+      const d = getDomainStr(item);
+      if (d) currentGeneralSet.add(d);
+    });
+    if (blocklists.perUser) {
+      Object.values(blocklists.perUser).forEach(list => {
+        (list || []).forEach(item => {
+          const d = getDomainStr(item);
+          if (d) currentGeneralSet.add(d);
+        });
+      });
+    }
 
     for (let i = 0; i < updatedFeeds.length; i++) {
       const feed = updatedFeeds[i];

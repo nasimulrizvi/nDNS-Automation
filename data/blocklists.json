@@ -58,6 +58,24 @@
         "updatedBy": "native"
       },
       {
+        "domain": "bdevent.ggpolarbear.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "bdnetwork.ggpolarbear.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "clientbp.ggpolarbear.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
+        "updatedBy": "native"
+      },
+      {
         "domain": "codm.garena.com",
         "alertEnabled": false,
         "addedAt": "2026-07-26T02:30:08.990Z",
@@ -89,6 +107,30 @@
       },
       {
         "domain": "deltaforce.garena.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dl-bs.ggpolarbear.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dl-sg-production.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-11T12:36:29.415Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dl.castle.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "dl.dir.freefiremobile.com",
         "alertEnabled": false,
         "addedAt": "2026-07-26T02:30:08.990Z",
         "updatedBy": "native"
@@ -133,6 +175,18 @@
         "domain": "ffguide.garena.com",
         "alertEnabled": false,
         "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ffmconnect.ppmainecoonghj.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ffmmsdk.ppmainecoonghj.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
         "updatedBy": "native"
       },
       {
@@ -232,6 +286,24 @@
         "updatedBy": "native"
       },
       {
+        "domain": "ggpolarbear.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ggwhitehawk.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "gin.freefiremobile.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-11T12:36:29.415Z",
+        "updatedBy": "native"
+      },
+      {
         "domain": "hotro.ff.garena.vn",
         "alertEnabled": false,
         "addedAt": "2026-07-26T02:30:08.990Z",
@@ -244,9 +316,21 @@
         "updatedBy": "native"
       },
       {
+        "domain": "loginbp.ggpolarbear.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
+        "updatedBy": "native"
+      },
+      {
         "domain": "my.games",
         "alertEnabled": false,
         "addedAt": "2026-07-26T02:30:08.990Z",
+        "updatedBy": "native"
+      },
+      {
+        "domain": "ppmainecoonghj.com",
+        "alertEnabled": false,
+        "addedAt": "2026-08-26T13:54:12.333Z",
         "updatedBy": "native"
       },
       {
@@ -399,43 +483,43 @@
       }
     ]
   },
-  "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+  "lastSyncedAt": "2026-09-03T06:09:45.348Z",
   "profileLastSyncedAt": {
-    "primary": "2026-07-26T05:43:32.995Z",
-    "mine": "2026-07-26T05:43:32.995Z",
-    "ammu": "2026-07-26T05:43:32.995Z",
-    "abbu": "2026-07-26T05:43:32.995Z",
-    "others": "2026-07-26T05:43:32.995Z",
-    "router": "2026-07-26T05:43:32.995Z"
+    "primary": "2026-09-03T06:09:45.348Z",
+    "mine": "2026-09-03T06:09:45.348Z",
+    "ammu": "2026-09-03T06:09:45.348Z",
+    "abbu": "2026-09-03T06:09:45.348Z",
+    "others": "2026-09-03T06:09:45.348Z",
+    "router": "2026-09-03T06:09:45.348Z"
   },
   "profileSyncStatus": {
     "primary": {
-      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastSyncedAt": "2026-09-03T06:09:45.348Z",
       "lastChangedBy": "sync",
       "lastChangeSummary": "In Sync with NextDNS Native Authority"
     },
     "mine": {
-      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastSyncedAt": "2026-09-03T06:09:45.348Z",
       "lastChangedBy": "sync",
       "lastChangeSummary": "In Sync with NextDNS Native Authority"
     },
     "ammu": {
-      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastSyncedAt": "2026-09-03T06:09:45.348Z",
       "lastChangedBy": "sync",
       "lastChangeSummary": "In Sync with NextDNS Native Authority"
     },
     "abbu": {
-      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastSyncedAt": "2026-09-03T06:09:45.348Z",
       "lastChangedBy": "sync",
       "lastChangeSummary": "In Sync with NextDNS Native Authority"
     },
     "others": {
-      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastSyncedAt": "2026-09-03T06:09:45.348Z",
       "lastChangedBy": "sync",
       "lastChangeSummary": "In Sync with NextDNS Native Authority"
     },
     "router": {
-      "lastSyncedAt": "2026-07-26T05:43:32.995Z",
+      "lastSyncedAt": "2026-09-03T06:09:45.348Z",
       "lastChangedBy": "sync",
       "lastChangeSummary": "In Sync with NextDNS Native Authority"
     }

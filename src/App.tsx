@@ -10,10 +10,13 @@ import AnalyticsView from './components/AnalyticsView';
 import SecurityLogsView from './components/SecurityLogsView';
 import SettingsView from './components/SettingsView';
 import ErrorBoundary from './components/ErrorBoundary';
+import NDNSLogo from './components/NDNSLogo';
+import TurnstileSecurityModal from './components/TurnstileSecurityModal';
 import { 
   ShieldAlert, 
   Layers, 
   ShieldCheck, 
+  Shield,
   Settings, 
   Terminal, 
   BarChart3, 
@@ -35,6 +38,7 @@ export default function App() {
   const [refreshingLogs, setRefreshingLogs] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [clockTimeUtc6, setClockTimeUtc6] = useState<string>(() => formatTimeUtcPlus6(new Date()));
+  const [showTurnstileModal, setShowTurnstileModal] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -98,7 +102,9 @@ export default function App() {
       setState(updatedState);
     } catch (e) {
       console.error('Error fetching state:', e);
-      showNotification('error', 'Could not sync current state from backend container');
+      if (!silent && !state) {
+        showNotification('error', 'Could not sync current state from backend container');
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -272,10 +278,8 @@ export default function App() {
       <aside className="w-full md:w-64 bg-[#080c14] border-b md:border-b-0 md:border-r border-slate-900 shrink-0 flex flex-col justify-between">
         <div className="p-5 space-y-6">
           {/* Main Logo & title */}
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl text-white shadow-lg">
-              <ShieldCheck size={20} />
-            </div>
+          <div className="flex items-center gap-2.5" id="app-sidebar-logo">
+            <NDNSLogo size={20} showContainer={true} />
             <div>
               <h1 className="font-extrabold text-sm tracking-tight text-white leading-none">nDNS Automations</h1>
               <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider font-semibold">Multi-User Console</p>
@@ -387,6 +391,20 @@ export default function App() {
               {currentState.settings.nextDnsApiKey ? 'Connected' : 'Disconnected'}
             </span>
           </div>
+
+          <div className="flex justify-between items-center">
+            <span>CF Turnstile:</span>
+            <button
+              type="button"
+              id="sidebar-turnstile-status-btn"
+              onClick={() => setShowTurnstileModal(true)}
+              className="text-orange-400 hover:text-orange-300 font-bold flex items-center gap-1 transition"
+              title="Cloudflare Turnstile Bot Protection Active - Click to test challenge"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              Protected
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -470,6 +488,17 @@ export default function App() {
           </ErrorBoundary>
         </div>
       </main>
+
+      <TurnstileSecurityModal
+        isOpen={showTurnstileModal}
+        onClose={() => setShowTurnstileModal(false)}
+        onVerified={() => {
+          setNotification({
+            type: 'success',
+            message: 'Cloudflare Turnstile token validated successfully with Cloudflare API!'
+          });
+        }}
+      />
     </div>
   );
 }

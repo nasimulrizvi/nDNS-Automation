@@ -115,15 +115,143 @@ export class TelegramBotService {
     }
   }
 
-  // Express Request Handler for POST /api/telegram/webhook
-  static async handleWebhook(req: Request, res: Response) {
-    // Respond to Telegram immediately with HTTP 200 to prevent retries
-    res.status(200).json({ ok: true });
+  private static isPolling = false;
+  private static pollingAbortController: AbortController | null = null;
+  private static processedUpdateIds = new Set<number>();
+  private static lastUpdateOffset = 0;
+
+  // Start Background Long-Polling for Telegram Updates
+  static async startPolling(): Promise<void> {
+    const settings = await ServerDB.getSettings();
+    if (!settings.telegramBotToken) {
+      console.log('[TelegramBot] Long polling not started: No Telegram Bot Token configured.');
+      return;
+    }
+
+    if (this.isPolling) {
+      console.log('[TelegramBot] Long polling is already active.');
+      return;
+    }
+
+    this.isPolling = true;
+    this.pollingAbortController = new AbortController();
+
+    console.log('[TelegramBot] Initializing Telegram Long-Polling engine...');
+
+    // Clear any stale webhook to allow getUpdates
+    try {
+      const delUrl = `https://api.telegram.org/bot${settings.telegramBotToken}/deleteWebhook?drop_pending_updates=false`;
+      const delRes = await fetch(delUrl);
+      const delJson = await delRes.json() as any;
+      console.log('[TelegramBot] Webhook status for long polling:', delJson?.description || delJson?.ok);
+    } catch (e) {
+      console.warn('[TelegramBot] Could not delete webhook prior to polling:', e);
+    }
+
+    // Set bot commands menu in BotFather
+    try {
+      const cmdUrl = `https://api.telegram.org/bot${settings.telegramBotToken}/setMyCommands`;
+      await fetch(cmdUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: [
+            { command: 'status', description: 'Quick traffic & block summary across profiles' },
+            { command: 'block', description: 'Add domain to Shared General or profile' },
+            { command: 'unblock', description: 'Unblock domain (within 24h) from Shared General or profile' },
+            { command: 'watch', description: 'Add domain to Watchlist Alerts' },
+            { command: 'unwatch', description: 'Remove domain from Watchlist' },
+            { command: 'report', description: 'Generate on-demand Security & Top Domains Report' },
+            { command: 'help', description: 'Show available bot commands' }
+          ]
+        })
+      });
+    } catch (e) {
+      console.warn('[TelegramBot] Could not setMyCommands:', e);
+    }
+
+    // Long-polling worker loop
+    (async () => {
+      let consecutiveErrors = 0;
+      while (this.isPolling) {
+        try {
+          const currentSettings = await ServerDB.getSettings();
+          const token = currentSettings.telegramBotToken;
+          if (!token) {
+            console.log('[TelegramBot] Bot token removed. Stopping polling.');
+            this.stopPolling();
+            break;
+          }
+
+          const offsetParam = this.lastUpdateOffset > 0 ? `&offset=${this.lastUpdateOffset}` : '';
+          const url = `https://api.telegram.org/bot${token}/getUpdates?timeout=20&limit=50${offsetParam}&allowed_updates=["message","callback_query","edited_message"]`;
+
+          const res = await fetch(url, {
+            signal: this.pollingAbortController?.signal
+          });
+
+          if (!res.ok) {
+            const errText = await res.text();
+            console.warn(`[TelegramBot] getUpdates non-ok (${res.status}):`, errText);
+            consecutiveErrors++;
+            const backoff = Math.min(consecutiveErrors * 2000, 15000);
+            await new Promise(r => setTimeout(r, backoff));
+            continue;
+          }
+
+          const data = await res.json() as any;
+          if (data.ok && Array.isArray(data.result)) {
+            consecutiveErrors = 0;
+            for (const update of data.result) {
+              if (typeof update.update_id === 'number') {
+                this.lastUpdateOffset = update.update_id + 1;
+
+                if (this.processedUpdateIds.has(update.update_id)) {
+                  continue;
+                }
+                this.processedUpdateIds.add(update.update_id);
+                if (this.processedUpdateIds.size > 2000) {
+                  this.processedUpdateIds.clear();
+                }
+
+                // Process update asynchronously
+                this.processUpdate(update).catch(err => {
+                  console.error('[TelegramBot] Error processing update:', err);
+                });
+              }
+            }
+          }
+        } catch (err: any) {
+          if (err?.name === 'AbortError' || !this.isPolling) {
+            console.log('[TelegramBot] Long-polling aborted.');
+            break;
+          }
+          consecutiveErrors++;
+          console.warn('[TelegramBot] Polling loop exception:', err?.message || err);
+          const backoff = Math.min(consecutiveErrors * 2000, 10000);
+          await new Promise(r => setTimeout(r, backoff));
+        }
+      }
+    })();
+  }
+
+  // Stop background polling
+  static stopPolling(): void {
+    this.isPolling = false;
+    if (this.pollingAbortController) {
+      try {
+        this.pollingAbortController.abort();
+      } catch (e) {}
+      this.pollingAbortController = null;
+    }
+    console.log('[TelegramBot] Long polling stopped.');
+  }
+
+  // Unified Update Processor (used by both Long Polling and Webhooks)
+  static async processUpdate(update: any): Promise<void> {
+    if (!update) return;
 
     try {
-      const update = req.body;
-      if (!update) return;
-
       const settings = await ServerDB.getSettings();
       const authorizedChatId = settings.telegramChatId ? settings.telegramChatId.toString().trim() : '';
 
@@ -148,14 +276,43 @@ export class TelegramBotService {
       const incomingChatId = message.chat.id ? message.chat.id.toString().trim() : '';
       const rawText = message.text.trim();
 
-      // Compare the incoming chat.id against the chatId already stored in settings.
-      if (!authorizedChatId || incomingChatId !== authorizedChatId) {
+      // If authorizedChatId is configured, enforce security
+      if (authorizedChatId && incomingChatId !== authorizedChatId) {
         console.warn(`[TelegramBot] Access denied for incoming chat_id: "${incomingChatId}" (Authorized: "${authorizedChatId}")`);
         return;
       }
 
+      // If authorizedChatId was not yet saved, save it now from first incoming message
+      if (!authorizedChatId && incomingChatId) {
+        settings.telegramChatId = incomingChatId;
+        await ServerDB.saveSettings(settings);
+        console.log(`[TelegramBot] Auto-configured authorized telegramChatId to ${incomingChatId}`);
+      }
+
       // Route the command
       await TelegramBotService.processCommand(incomingChatId, rawText);
+    } catch (err) {
+      console.error('[TelegramBot] Error in processUpdate:', err);
+    }
+  }
+
+  // Express Request Handler for POST /api/telegram/webhook
+  static async handleWebhook(req: Request, res: Response) {
+    // Respond to Telegram immediately with HTTP 200 to prevent retries
+    res.status(200).json({ ok: true });
+
+    try {
+      const update = req.body;
+      if (!update) return;
+
+      if (typeof update.update_id === 'number') {
+        if (TelegramBotService.processedUpdateIds.has(update.update_id)) {
+          return;
+        }
+        TelegramBotService.processedUpdateIds.add(update.update_id);
+      }
+
+      await TelegramBotService.processUpdate(update);
     } catch (err) {
       console.error('[TelegramBot] Error handling webhook update:', err);
     }

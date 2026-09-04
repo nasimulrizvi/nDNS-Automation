@@ -5,6 +5,7 @@ import { ServerDB, createOrPreserveDenylistItem, isDomainLocked } from './server
 import { NextDNSService } from './server-nextdns';
 import { ThreatFeedService } from './server-threatfeed';
 import { TelegramBotService } from './server-telegram';
+import { TurnstileService } from './server-turnstile';
 
 async function startServer() {
   const app = express();
@@ -15,10 +16,11 @@ async function startServer() {
   // Bootstrap JSON storage schemas and load listeners
   await ServerDB.initialize();
   NextDNSService.startAllMonitors();
+  TelegramBotService.startPolling();
 
-  // --- TELEGRAM BOT WEBHOOK & COMMAND ROUTES ---
+  // --- TELEGRAM BOT WEBHOOK, POLLING & COMMAND ROUTES ---
 
-  // Webhook handler called by Telegram
+  // Webhook handler called by Telegram (if webhook mode is used)
   app.post('/api/telegram/webhook', TelegramBotService.handleWebhook);
 
   // Manual or automatic Webhook Setup route
@@ -32,7 +34,67 @@ async function startServer() {
     }
   });
 
+  // Test Telegram Bot Connection and send test message
+  app.post('/api/telegram/test', async (req, res) => {
+    try {
+      const settings = await ServerDB.getSettings();
+      if (!settings.telegramBotToken || !settings.telegramChatId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Telegram Bot Token and Chat ID must be configured in Settings.'
+        });
+      }
+
+      const testMsg = `🤖 <b>nDNS Automations — Test Alert</b>\n\n` +
+        `✅ Your Telegram Bot integration is working properly!\n` +
+        `• <b>Chat ID:</b> <code>${settings.telegramChatId}</code>\n` +
+        `• <b>Time:</b> ${new Date().toISOString()}\n\n` +
+        `Try typing <code>/report</code> or <code>/status</code> in this chat!`;
+
+      const sent = await TelegramBotService.sendReply(settings.telegramChatId, testMsg);
+      if (sent) {
+        res.json({ success: true, message: 'Test message delivered to Telegram successfully!' });
+      } else {
+        res.status(500).json({ success: false, message: 'Failed to send message via Telegram API. Check bot token.' });
+      }
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
   // --- API ROUTES FIRST ---
+
+  // Cloudflare Turnstile status
+  app.get('/api/turnstile/status', (req, res) => {
+    try {
+      const status = TurnstileService.getStatus();
+      res.json({ success: true, ...status });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // Cloudflare Turnstile server-side verification endpoint
+  app.post('/api/turnstile/verify', async (req, res) => {
+    try {
+      const { token } = req.body || {};
+      const clientIp = (
+        (req.headers['x-forwarded-for'] as string)?.split(',')[0] ||
+        req.socket.remoteAddress ||
+        req.ip ||
+        ''
+      ).trim();
+
+      const result = await TurnstileService.verifyToken(token, clientIp);
+      if (result.success) {
+        res.json({ success: true, result });
+      } else {
+        res.status(400).json({ success: false, result, message: result.message });
+      }
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
 
   // Get full state
   app.get('/api/state', async (req, res) => {
@@ -95,9 +157,11 @@ async function startServer() {
 
       await ServerDB.saveSettings(settings);
 
-      // Verify and restart SSE log streaming with new credentials if updated
+      // Verify and restart SSE log streaming and Telegram polling with new credentials
       NextDNSService.stopAllMonitors();
       NextDNSService.startAllMonitors();
+      TelegramBotService.stopPolling();
+      TelegramBotService.startPolling();
 
       res.json({ success: true, message: 'Settings updated and monitors restarted successfully!' });
     } catch (e: any) {
@@ -314,6 +378,14 @@ async function startServer() {
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message });
     }
+  });
+
+  // --- ENSURE UNMATCHED /api/* NEVER FALLS THROUGH TO VITE HTML FALLBACK ---
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      success: false,
+      message: `API endpoint ${req.method} ${req.originalUrl} not found`
+    });
   });
 
   // --- VITE MIDDLEWARE SETUP FOR DEV/PROD ---
