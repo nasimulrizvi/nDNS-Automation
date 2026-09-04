@@ -1,15 +1,25 @@
 # 🛡️ nDNS Automations — NextDNS Multi-Profile Automation & Security Dashboard
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-nasimul.ai.studio-success?logo=googlecloud&logoColor=white)](https://nasimul.ai.studio)
+[![Telegram Bot](https://img.shields.io/badge/Telegram_Bot-%40nDNS__AI__Bot-26A5E4.svg?logo=telegram&logoColor=white)](https://t.me/nDNS_AI_Bot)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-nasimulrizvi%2FnDNS--Automation-181717.svg?logo=github&logoColor=white)](https://github.com/nasimulrizvi/nDNS-Automation)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-19.0-61dafb.svg?logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-38bdf8.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![Express](https://img.shields.io/badge/Express-4.21-000000.svg?logo=express&logoColor=white)](https://expressjs.com/)
 [![Cloudflare Turnstile](https://img.shields.io/badge/Protected_by-Cloudflare_Turnstile-f38020.svg?logo=cloudflare&logoColor=white)](https://www.cloudflare.com/products/turnstile/)
-[![Telegram Bot](https://img.shields.io/badge/Alerts-Telegram_Bot-26A5E4.svg?logo=telegram&logoColor=white)](https://core.telegram.org/bots)
 
 > **nDNS Automations** is an enterprise-grade, full-stack DNS security management suite engineered to orchestrate, synchronize, and monitor multiple **NextDNS** profiles. It features automated threat-feed ingestion, cross-profile blocklist synchronization, device-level query telemetry, instant Telegram incident alerting, and Cloudflare Turnstile bot protection.
+
+---
+
+## 🔗 Quick Links
+
+- 🌐 **Live Web Application:** [https://nasimul.ai.studio](https://nasimul.ai.studio)
+- 🤖 **Telegram Security Bot:** [@nDNS_AI_Bot](https://t.me/nDNS_AI_Bot)
+- 📦 **GitHub Repository:** [nasimulrizvi/nDNS-Automation](https://github.com/nasimulrizvi/nDNS-Automation)
+- 👨‍💻 **Developer Portfolio:** [nasimulrizvi.com](https://www.nasimulrizvi.com/)
 
 ---
 
@@ -18,7 +28,7 @@
 - **🔄 Multi-Profile Synchronization:** Seamlessly manage and broadcast blocklists, allowlists, and security policies across individual, family, or enterprise NextDNS profiles from a single unified pane.
 - **⚡ Automated Threat Intelligence (TI):** Continuously ingests OSINT threat feeds, phishing feeds, and malware domain lists, automatically converting IOCs (Indicators of Compromise) into actionable NextDNS block rules.
 - **📊 Real-Time Device Telemetry & Analytics:** Granular device-by-device metrics displaying total queries, blocked percentage, top queried domains, and malware/tracker block breakdowns with low-overhead caching.
-- **🚨 Telegram Instant Incident Response:** Two-way Telegram bot integration that broadcasts real-time security alerts (malware blocks, watchlist hits, domain alerts) and allows on-the-fly interactive domain blocking directly from chat.
+- **🚨 Telegram Instant Incident Response ([@nDNS_AI_Bot](https://t.me/nDNS_AI_Bot)):** Two-way Telegram bot integration that broadcasts real-time security alerts (malware blocks, watchlist hits, domain alerts) and allows on-the-fly interactive domain blocking directly from chat.
 - **🛡️ Cloudflare Turnstile Bot Defense:** Built-in client and server-side verification using Cloudflare Turnstile (`challenges.cloudflare.com/turnstile/v0/siteverify`), protecting the dashboard from unauthorized automated abuse without annoying CAPTCHAs.
 - **📈 Live Security Stream (SSE):** Server-Sent Events stream live DNS resolution logs, query metrics, and threat feed update events directly to the frontend with zero polling strain.
 
@@ -33,10 +43,10 @@
                                 +-------------+-------------+
                                               |
                                               v
-+------------------+          +-------------------------------+          +--------------------+
-|  Telegram Client | <======> |     nDNS Automation Server    | <======> | NextDNS REST & SSE |
-| (Bot / Webhooks) |          | (Node.js + Express + Caching) |          | (Profiles / Logs)  |
-+------------------+          +---------------+---------------+          +--------------------+
++------------------------+      +-------------------------------+      +--------------------+
+|  Telegram Client Bot   | <==> |     nDNS Automation Server    | <==> | NextDNS REST & SSE |
+| (@nDNS_AI_Bot Webhook) |      | (Node.js + Express + Caching) |      | (Profiles / Logs)  |
++------------------------+      +---------------+---------------+      +--------------------+
                                               |
                                               v
                               +-------------------------------+
@@ -67,17 +77,17 @@
 - **Node.js**: `v20.x` or higher
 - **npm** or **bun**
 - A valid **NextDNS Account** and API key ([nextdns.io/account](https://my.nextdns.io/account))
-- *(Optional)* **Telegram Bot Token & Chat ID** ([BotFather](https://t.me/botfather))
+- *(Optional)* **Telegram Bot Token & Chat ID** via [@nDNS_AI_Bot](https://t.me/nDNS_AI_Bot) / [@BotFather](https://t.me/botfather)
 - *(Optional)* **Cloudflare Turnstile Site Key & Secret Key** ([Cloudflare Dashboard](https://dash.cloudflare.com/))
 
 ---
 
-### Installation
+### Installation & Setup
 
 1. **Clone the Repository:**
    ```bash
-   git clone https://github.com/your-username/ndns-automations.git
-   cd ndns-automations
+   git clone https://github.com/nasimulrizvi/nDNS-Automation.git
+   cd nDNS-Automation
    ```
 
 2. **Install Dependencies:**
@@ -93,10 +103,10 @@
 
    Configure the required variables:
    ```env
-   # Application Host URL (Optional for local development)
-   APP_URL="http://localhost:3000"
+   # Application Host URL (Production or Localhost)
+   APP_URL="https://nasimul.ai.studio"
 
-   # Telegram Bot Integration (Optional)
+   # Telegram Bot Integration (Bot: @nDNS_AI_Bot)
    TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"
    TELEGRAM_CHAT_ID="987654321"
 
@@ -119,7 +129,7 @@
 
 ---
 
-## ⚙️ Core Configuration & Modules
+## ⚙️ Core Modules & Configuration
 
 ### 1. NextDNS Profile Sync
 - Connect via your NextDNS API Key in **Settings**.
@@ -129,9 +139,9 @@
 - Add upstream blocklists or IOC feeds in plain text / raw format.
 - Set automated synchronization intervals to pull malicious domains and push them to active NextDNS profiles.
 
-### 3. Telegram Security Bot
+### 3. Telegram Security Bot ([@nDNS_AI_Bot](https://t.me/nDNS_AI_Bot))
 - Instant notifications when a watched domain or high-risk category is blocked.
-- Interactive alerts with inline action buttons to unblock or investigate queries.
+- Interactive alerts with inline action buttons to unblock or investigate queries on the fly.
 
 ### 4. Cloudflare Turnstile Protection
 - Protects administrative dashboards and sensitive state changes from automated scraping or credential-stuffing bots.
@@ -149,15 +159,31 @@
 
 ## 📄 License
 
-Distributed under the **MIT License**. See `LICENSE` for more information.
+This project is licensed under the **MIT License** — see the [LICENSE](./LICENSE) file for details.
+
+```text
+MIT License
+Copyright (c) 2026 Md. Nasimul Islam Rizvi (https://www.nasimulrizvi.com/)
+```
+
+---
+
+## 👨‍💻 Author & Credits
+
+Designed & Built with ❤️ by **[Md. Nasimul Islam Rizvi](https://www.nasimulrizvi.com/)**
+
+- 🌐 Website: [https://www.nasimulrizvi.com/](https://www.nasimulrizvi.com/)
+- 🐙 GitHub: [@nasimulrizvi](https://github.com/nasimulrizvi)
+- 💬 Telegram Bot: [@nDNS_AI_Bot](https://t.me/nDNS_AI_Bot)
+- 🚀 Live App: [https://nasimul.ai.studio](https://nasimul.ai.studio)
 
 ---
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome!
-Feel free to check the [issues page](https://github.com/your-username/ndns-automations/issues).
+Contributions, issues, and feature requests are welcome!  
+Feel free to open an issue or pull request at [nasimulrizvi/nDNS-Automation/issues](https://github.com/nasimulrizvi/nDNS-Automation/issues).
 
 ---
 
-*Engineered with precision for modern network privacy and proactive DNS security.*
+*© 2026 Designed & Built by [Md. Nasimul Islam Rizvi](https://www.nasimulrizvi.com/). All rights reserved.*
